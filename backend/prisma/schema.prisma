@@ -1,0 +1,151 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum IntegrityStatus {
+  OK
+  TAMPERED
+}
+
+enum SharePermission {
+  VIEW
+  DOWNLOAD
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model User {
+  id                  String   @id @default(uuid())
+  email               String   @unique
+  passwordHash        String
+  role                Role     @default(USER)
+  failedLoginAttempts Int      @default(0)
+  lockoutUntil        DateTime?
+  lastLoginIp         String?
+  lastLoginUserAgent  String?
+  lastLoginAt         DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  refreshTokens          RefreshToken[]
+  ownedFiles             File[]                  @relation("FileOwner")
+  sharesGiven            FileShare[]             @relation("SharesGiven")
+  sharesReceived         FileShare[]             @relation("SharesReceived")
+  activityLogs           ActivityLog[]
+  securityAlerts         SecurityAlert[]
+  securityScoreSnapshots SecurityScoreSnapshot[]
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  revoked   Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([tokenHash])
+}
+
+model File {
+  id               String          @id @default(uuid())
+  ownerId          String
+  owner            User            @relation("FileOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  originalFilename String
+  storageKey       String          @unique @default(uuid())
+  size             Int
+  mimeType         String
+  sha256Hash       String
+  iv               String
+  authTag          String
+  wrappedDek       String
+  dekIv            String
+  dekAuthTag       String
+  integrityStatus  IntegrityStatus @default(OK)
+  isHoneyfile      Boolean         @default(false)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  shares FileShare[]
+
+  @@index([ownerId])
+  @@index([storageKey])
+}
+
+model FileShare {
+  id           String          @id @default(uuid())
+  fileId       String
+  file         File            @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  sharedById   String
+  sharedBy     User            @relation("SharesGiven", fields: [sharedById], references: [id], onDelete: Cascade)
+  sharedWithId String
+  sharedWith   User            @relation("SharesReceived", fields: [sharedWithId], references: [id], onDelete: Cascade)
+  permission   SharePermission
+  expiresAt    DateTime?
+  createdAt    DateTime        @default(now())
+
+  @@unique([fileId, sharedWithId])
+  @@index([fileId])
+  @@index([sharedWithId])
+}
+
+model ActivityLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  actionType String
+  resourceId String?
+  ipAddress  String
+  userAgent  String
+  metadata   Json?
+  timestamp  DateTime @default(now())
+
+  @@index([userId])
+  @@index([actionType])
+  @@index([timestamp])
+}
+
+model SecurityAlert {
+  id          String    @id @default(uuid())
+  userId      String?
+  user        User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  alertType   String
+  riskLevel   RiskLevel
+  description String
+  resolved    Boolean   @default(false)
+  timestamp   DateTime  @default(now())
+
+  @@index([userId])
+  @@index([riskLevel])
+  @@index([resolved])
+}
+
+model SecurityScoreSnapshot {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  score        Int
+  rating       String?
+  breakdown    Json?
+  calculatedAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([calculatedAt])
+}
