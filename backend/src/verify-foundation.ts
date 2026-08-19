@@ -5,9 +5,9 @@ import path from 'path';
 dotenv.config({ path: path.resolve(process.cwd(), '../.env') });
 dotenv.config();
 
-import { checkDatabaseHealth } from './config/db.js';
-import { checkRedisHealth } from './config/redis.js';
-import { checkMinioHealth } from './config/minio.js';
+import { checkDatabaseHealth } from './config/db';
+import { checkRedisHealth } from './config/redis';
+import { checkMinioHealth } from './config/minio';
 
 async function runFoundationCheck() {
   console.log('--- FILEVAULT PHASE 1 FOUNDATION VERIFICATION ---');

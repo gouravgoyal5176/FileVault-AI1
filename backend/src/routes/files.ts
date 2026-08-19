@@ -14,9 +14,9 @@ import {
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 500 * 1024 * 1024, // 50MB max file size limit
+    fileSize: 50 * 1024 * 1024, // 50MB max file size limit
   },
-   fileFilter: (req, file, cb) => {
+  fileFilter: (_req, _file, cb) => {
     cb(null, true);
   },
 });
@@ -73,38 +73,55 @@ fileRouter.post('/:id/verify', async (req: AuthRequest, res: Response) => {
 });
 
 // POST /api/files/upload
-fileRouter.post('/upload', upload.single('file'), async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file provided in upload request.' });
-    }
-
-    const isHoneyfile = req.body?.isHoneyfile === 'true' || req.body?.isHoneyfile === true;
-    const { ipAddress, userAgent } = getClientMeta(req);
-
-    const result = await uploadFile(
-      req.user.id,
-      req.file.buffer,
-      req.file.originalname,
-      req.file.mimetype,
-      isHoneyfile,
-      ipAddress,
-      userAgent
-    );
-
-    return res.status(201).json({
-      message: 'File encrypted and stored successfully.',
-      file: result,
+fileRouter.post(
+  '/upload',
+  (req: AuthRequest, res: Response, next: any) => {
+    upload.single('file')(req, res, (err: any) => {
+      if (err) {
+        if (err instanceof multer.MulterError) {
+          if (err.code === 'LIMIT_FILE_SIZE') {
+            return res.status(400).json({ error: 'File payload size exceeds maximum upload limit of 50MB.' });
+          }
+          return res.status(400).json({ error: `Upload error: ${err.message}` });
+        }
+        return res.status(400).json({ error: err.message || 'File upload parsing failed.' });
+      }
+      next();
     });
-  } catch (error: any) {
-    const statusCode = error.statusCode || 500;
-    return res.status(statusCode).json({ error: error.message || 'File upload failed' });
+  },
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ error: 'No file provided in upload request.' });
+      }
+
+      const isHoneyfile = req.body?.isHoneyfile === 'true' || req.body?.isHoneyfile === true;
+      const { ipAddress, userAgent } = getClientMeta(req);
+
+      const result = await uploadFile(
+        req.user.id,
+        req.file.buffer,
+        req.file.originalname,
+        req.file.mimetype,
+        isHoneyfile,
+        ipAddress,
+        userAgent
+      );
+
+      return res.status(201).json({
+        message: 'File encrypted and stored successfully.',
+        file: result,
+      });
+    } catch (error: any) {
+      const statusCode = error.statusCode || 500;
+      return res.status(statusCode).json({ error: error.message || 'File upload failed' });
+    }
   }
-});
+);
 
 // GET /api/files (List & Search)
 fileRouter.get('/', async (req: AuthRequest, res: Response) => {

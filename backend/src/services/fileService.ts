@@ -11,6 +11,7 @@ import crypto from 'crypto';
 import { Readable } from 'stream';
 import { trackDownloadSpike } from './threatService';
 import { triggerHoneyfileTrap } from './honeyfileService';
+import { sendShareNotificationEmail } from './emailService';
 
 // Utility helper to convert MinIO stream to Buffer
 async function streamToBuffer(stream: Readable): Promise<Buffer> {
@@ -104,6 +105,21 @@ export async function uploadFile(
   userAgent: string
 ) {
   console.log(`[Upload Pipeline] Initiating upload: "${originalFilename}" (${fileBuffer.length} bytes, MIME: ${mimeType}) for user ${userId}`);
+
+  // Enforce cumulative 2 GB storage quota per user
+  const currentUsage = await prisma.file.aggregate({
+    where: { ownerId: userId },
+    _sum: { size: true },
+  });
+  const usedBytes = currentUsage._sum.size || 0;
+  const MAX_QUOTA_BYTES = 2 * 1024 * 1024 * 1024; // 2.00 GB
+
+  if (usedBytes + fileBuffer.length > MAX_QUOTA_BYTES) {
+    throw {
+      statusCode: 400,
+      message: `Storage quota exceeded. Your current usage is ${(usedBytes / (1024 * 1024)).toFixed(1)} MB out of 2.00 GB limit.`,
+    };
+  }
 
   // Generate random UUID for storage key (Path Traversal Protection)
   const storageKey = crypto.randomUUID();
@@ -624,7 +640,36 @@ export async function shareFile(
     },
   });
 
-  return share;
+  // Fetch owner email for notification template
+  const owner = await prisma.user.findUnique({
+    where: { id: ownerId },
+    select: { email: true },
+  });
+
+  // Dispatch notification email
+  let emailSent = false;
+  let emailError: string | undefined = undefined;
+
+  try {
+    const emailResult = await sendShareNotificationEmail({
+      recipientEmail: recipient.email,
+      sharedByEmail: owner?.email || 'A FileVault User',
+      originalFilename: file.originalFilename,
+      permission,
+      expiresAt: parsedExpiresAt,
+    });
+    emailSent = emailResult.success;
+    emailError = emailResult.error;
+  } catch (err: any) {
+    console.warn('Share notification email dispatch error:', err.message);
+    emailError = err.message;
+  }
+
+  return {
+    share,
+    emailSent,
+    emailError,
+  };
 }
 
 export async function listFileShares(fileId: string, ownerId: string) {

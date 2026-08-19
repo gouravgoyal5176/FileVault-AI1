@@ -33,7 +33,7 @@ export function ThreatAlertsWidget() {
       setAlerts(alertsData.alerts);
       setSummary(summaryData);
     } catch (err) {
-      // Ignore errors if threats API not reachable yet
+      // Ignore API errors gracefully
     } finally {
       setLoading(false);
     }
@@ -46,48 +46,48 @@ export function ThreatAlertsWidget() {
   const getRiskBadge = (level: string) => {
     switch (level) {
       case 'CRITICAL':
-        return 'bg-rose-500/20 text-rose-300 border-rose-500/40 shadow-[0_0_12px_rgba(244,63,94,0.4)]';
+        return 'bg-rose-50 text-rose-700 border-rose-200';
       case 'HIGH':
-        return 'bg-orange-500/20 text-orange-300 border-orange-500/40 shadow-[0_0_10px_rgba(249,115,22,0.3)]';
+        return 'bg-orange-50 text-orange-700 border-orange-200';
       case 'MEDIUM':
-        return 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-[0_0_10px_rgba(245,158,11,0.3)]';
+        return 'bg-amber-50 text-amber-700 border-amber-200';
       default:
-        return 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40 shadow-[0_0_10px_rgba(34,211,238,0.3)]';
+        return 'bg-blue-50 text-blue-700 border-blue-200';
     }
   };
 
   return (
-    <div className="bg-slate-900/40 backdrop-blur-xl border border-white/10 rounded-3xl p-6 space-y-4 shadow-[0_0_30px_rgba(0,0,0,0.5)] font-mono transition-all duration-300 hover:border-cyan-500/30">
+    <div className="bg-white border border-slate-200/80 rounded-2xl p-6 space-y-4 shadow-sm font-sans transition-all hover:shadow-md">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-rose-500/20 text-rose-400 rounded-xl border border-rose-500/40 shadow-[0_0_15px_rgba(244,63,94,0.3)]">
-            <ShieldAlert className="w-5 h-5 animate-pulse" />
+          <div className="p-2.5 bg-rose-50 text-rose-600 rounded-xl border border-rose-200">
+            <ShieldAlert className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="font-extrabold text-white text-sm flex items-center gap-2.5 tracking-tight">
-              BEHAVIORAL THREAT MONITOR
+            <h3 className="font-extrabold text-slate-900 text-sm flex items-center gap-2.5 tracking-tight">
+              Behavioral Threat Monitor
               {summary && (
                 <span
                   className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold tracking-wider border ${
                     summary.threatLevel === 'HIGH'
-                      ? 'bg-rose-500/20 text-rose-300 border-rose-500/40 shadow-[0_0_12px_rgba(244,63,94,0.4)] animate-pulse'
+                      ? 'bg-rose-50 text-rose-700 border-rose-200 animate-pulse'
                       : summary.threatLevel === 'ELEVATED'
-                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-[0_0_10px_rgba(245,158,11,0.3)]'
-                      : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-[0_0_10px_rgba(52,211,153,0.3)]'
+                      ? 'bg-amber-50 text-amber-700 border-amber-200'
+                      : 'bg-emerald-50 text-emerald-700 border-emerald-200'
                   }`}
                 >
                   STATUS: {summary.threatLevel}
                 </span>
               )}
             </h3>
-            <p className="text-[11px] text-slate-400">Brute-force, unusual access &amp; bulk download detection</p>
+            <p className="text-[11px] text-slate-500 font-medium">Brute-force, unusual access &amp; bulk download detection</p>
           </div>
         </div>
 
         <button
           onClick={fetchThreatData}
           disabled={loading}
-          className="p-2 bg-slate-800/80 hover:bg-slate-700/80 text-cyan-400 rounded-xl border border-white/10 hover:border-cyan-500/40 transition-all duration-300 hover:scale-110 active:scale-95 disabled:opacity-50"
+          className="p-2 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-xl border border-slate-200 transition-all hover:scale-105 active:scale-95 cursor-pointer disabled:opacity-50"
           title="Refresh Security Alerts"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
@@ -95,31 +95,31 @@ export function ThreatAlertsWidget() {
       </div>
 
       {loading ? (
-        <p className="text-xs text-cyan-400/80 text-center py-4 tracking-wider">POLLING THREAT INDICATORS...</p>
+        <p className="text-xs text-slate-400 text-center py-4 font-medium">Polling threat indicators...</p>
       ) : alerts.length === 0 ? (
-        <div className="p-5 bg-slate-950/80 rounded-2xl border border-white/5 text-center space-y-1.5 shadow-inner">
-          <ShieldCheck className="w-7 h-7 text-emerald-400 mx-auto animate-pulse" />
-          <p className="text-xs font-bold text-white tracking-wide">NO SECURITY THREATS DETECTED</p>
-          <p className="text-[11px] text-slate-400">Your account shows clean behavioral baseline history.</p>
+        <div className="p-5 bg-slate-50/70 rounded-2xl border border-slate-200/80 text-center space-y-1.5">
+          <ShieldCheck className="w-7 h-7 text-emerald-600 mx-auto" />
+          <p className="text-xs font-bold text-slate-800 tracking-wide">No Security Threats Detected</p>
+          <p className="text-[11px] text-slate-500 font-medium">Your account shows clean behavioral baseline history.</p>
         </div>
       ) : (
         <div className="space-y-2.5 max-h-52 overflow-y-auto pr-1">
           {alerts.map((alert) => (
             <div
               key={alert.id}
-              className="p-3.5 bg-slate-950/80 rounded-2xl border border-white/10 text-xs space-y-2 hover:border-cyan-500/30 transition-all duration-300 shadow-inner"
+              className="p-3.5 bg-slate-50/80 rounded-2xl border border-slate-200/80 text-xs space-y-2 hover:border-slate-300 transition-all shadow-2xs"
             >
               <div className="flex items-center justify-between">
-                <span className="font-bold text-white flex items-center gap-2">
-                  <Bell className="w-3.5 h-3.5 text-amber-400" />
+                <span className="font-bold text-slate-900 flex items-center gap-2">
+                  <Bell className="w-3.5 h-3.5 text-amber-600" />
                   {alert.alertType}
                 </span>
                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${getRiskBadge(alert.riskLevel)}`}>
                   {alert.riskLevel}
                 </span>
               </div>
-              <p className="text-[11px] text-slate-300 leading-relaxed font-sans">{alert.description}</p>
-              <p className="text-[10px] text-slate-400">
+              <p className="text-[11px] text-slate-600 leading-relaxed font-sans">{alert.description}</p>
+              <p className="text-[10px] text-slate-400 font-mono">
                 {new Date(alert.timestamp).toLocaleString()}
               </p>
             </div>

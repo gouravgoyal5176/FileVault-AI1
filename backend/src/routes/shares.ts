@@ -37,7 +37,7 @@ shareRouter.post('/', async (req: AuthRequest, res: Response) => {
     const { fileId, recipientEmail, permission, expiresAt } = parseResult.data;
     const { ipAddress, userAgent } = getClientMeta(req);
 
-    const share = await shareFile(
+    const result = await shareFile(
       fileId,
       req.user.id,
       recipientEmail,
@@ -47,9 +47,15 @@ shareRouter.post('/', async (req: AuthRequest, res: Response) => {
       userAgent
     );
 
+    const message = result.emailSent
+      ? 'File shared successfully and notification email delivered to recipient.'
+      : 'File shared successfully, but notification email could not be delivered.';
+
     return res.status(201).json({
-      message: 'File shared successfully.',
-      share,
+      message,
+      share: result.share,
+      emailSent: result.emailSent,
+      emailError: result.emailError,
     });
   } catch (error: any) {
     const statusCode = error.statusCode || 500;
