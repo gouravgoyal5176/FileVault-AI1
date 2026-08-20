@@ -29,18 +29,27 @@ enum RiskLevel {
   CRITICAL
 }
 
+enum AuthProvider {
+  LOCAL
+  GOOGLE
+  HYBRID
+}
+
 model User {
-  id                  String   @id @default(uuid())
-  email               String   @unique
+  id                  String       @id @default(uuid())
+  email               String       @unique
   passwordHash        String
-  role                Role     @default(USER)
-  failedLoginAttempts Int      @default(0)
+  googleId            String?      @unique
+  authProvider        AuthProvider @default(LOCAL)
+  emailVerified       Boolean      @default(false)
+  role                Role         @default(USER)
+  failedLoginAttempts Int          @default(0)
   lockoutUntil        DateTime?
   lastLoginIp         String?
   lastLoginUserAgent  String?
   lastLoginAt         DateTime?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
 
   refreshTokens          RefreshToken[]
   ownedFiles             File[]                  @relation("FileOwner")

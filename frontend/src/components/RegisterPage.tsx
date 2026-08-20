@@ -1,13 +1,16 @@
 import { useState, FormEvent } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Lock, Mail, ShieldCheck, ShieldAlert, ArrowRight, Eye, EyeOff, Check, X } from 'lucide-react';
+import { GoogleAuthButton } from './GoogleAuthButton';
+import { OtpModal } from './OtpModal';
+import { apiRequest } from '../api/apiClient';
 
 interface RegisterPageProps {
   onSwitchToLogin: () => void;
 }
 
 export function RegisterPage({ onSwitchToLogin }: RegisterPageProps) {
-  const { register } = useAuth();
+  const { register, loginWithGoogle } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -16,6 +19,7 @@ export function RegisterPage({ onSwitchToLogin }: RegisterPageProps) {
   const [error, setError] = useState<string | null>(null);
   const [details, setDetails] = useState<string[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const [isOtpModalOpen, setIsOtpModalOpen] = useState(false);
 
   // Real-time password criteria verification
   const rules = [
@@ -41,12 +45,44 @@ export function RegisterPage({ onSwitchToLogin }: RegisterPageProps) {
     setLoading(true);
 
     try {
-      await register(email, password);
+      // Step 1: Send registration email OTP via Nodemailer SMTP
+      await apiRequest('/api/auth/otp/send', {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+      });
+      // Step 2: Open verification modal for 6-digit OTP
+      setIsOtpModalOpen(true);
     } catch (err: any) {
-      setError(err.message || 'Registration failed');
+      setError(err.message || 'Failed to dispatch email verification code');
       if (err.details && Array.isArray(err.details)) {
         setDetails(err.details);
       }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOtpVerified = async () => {
+    setLoading(true);
+    try {
+      await register(email, password);
+      setIsOtpModalOpen(false);
+    } catch (err: any) {
+      setError(err.message || 'Registration failed after verification.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleSuccess = async (idToken: string) => {
+    setError(null);
+    setDetails(null);
+    setLoading(true);
+
+    try {
+      await loginWithGoogle(idToken);
+    } catch (err: any) {
+      setError(err.message || 'Google registration failed');
     } finally {
       setLoading(false);
     }
@@ -170,10 +206,27 @@ export function RegisterPage({ onSwitchToLogin }: RegisterPageProps) {
               disabled={loading}
               className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow-md shadow-emerald-600/20 transition-all duration-200 flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-95 cursor-pointer disabled:opacity-50"
             >
-              {loading ? 'Creating Vault...' : 'Create Encrypted Vault'}
+              {loading ? 'Sending Verification Code...' : 'Verify Email & Create Vault'}
               <ArrowRight className="w-4 h-4 stroke-[2.5]" />
             </button>
           </form>
+
+          {/* Social / GIS Registration Divider */}
+          <div className="relative my-4">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-slate-200"></div>
+            </div>
+            <div className="relative flex justify-center text-[10px] uppercase font-bold text-slate-400">
+              <span className="bg-white px-3">Or register with</span>
+            </div>
+          </div>
+
+          {/* Google Identity Services Button */}
+          <GoogleAuthButton
+            buttonText="signup_with"
+            onSuccess={handleGoogleSuccess}
+            onError={(errMsg) => setError(errMsg)}
+          />
 
           <div className="pt-4 border-t border-slate-100 text-center">
             <p className="text-xs text-slate-500">
@@ -188,6 +241,14 @@ export function RegisterPage({ onSwitchToLogin }: RegisterPageProps) {
           </div>
         </div>
       </div>
+
+      {/* Registration Email OTP Verification Modal */}
+      <OtpModal
+        isOpen={isOtpModalOpen}
+        email={email}
+        onVerified={handleOtpVerified}
+        onClose={() => setIsOtpModalOpen(false)}
+      />
     </div>
   );
 }

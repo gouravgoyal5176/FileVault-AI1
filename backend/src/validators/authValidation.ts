@@ -16,5 +16,24 @@ export const loginSchema = z.object({
   password: z.string().min(1, 'Password is required'),
 });
 
+export const googleAuthSchema = z.object({
+  idToken: z.string().min(1, 'Google ID token is required'),
+});
+
+export const sendOtpSchema = z.object({
+  email: z.string().trim().email('Invalid email address format'),
+});
+
+export const verifyOtpSchema = z.object({
+  email: z.string().trim().email('Invalid email address format'),
+  otp: z
+    .string()
+    .length(6, 'Verification code must be exactly 6 digits')
+    .regex(/^[0-9]+$/, 'Verification code must contain only numbers'),
+});
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+export type GoogleAuthInput = z.infer<typeof googleAuthSchema>;
+export type SendOtpInput = z.infer<typeof sendOtpSchema>;
+export type VerifyOtpInput = z.infer<typeof verifyOtpSchema>;

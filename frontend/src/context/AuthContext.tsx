@@ -5,12 +5,17 @@ export interface User {
   id: string;
   email: string;
   role: 'USER' | 'ADMIN';
+  googleId?: string | null;
+  authProvider?: 'LOCAL' | 'GOOGLE' | 'HYBRID';
+  emailVerified?: boolean;
 }
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<{ requiresOtp?: boolean }>;
+  setSession: (accessToken: string, user: User) => void;
+  loginWithGoogle: (idToken: string) => Promise<void>;
   register: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   logoutAll: () => Promise<void>;
@@ -41,10 +46,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     initAuth();
   }, []);
 
+  const setSession = (accessToken: string, newUser: User) => {
+    setAccessToken(accessToken);
+    setUser(newUser);
+  };
+
   const login = async (email: string, password: string) => {
-    const data = await apiRequest<{ accessToken: string; user: User }>('/api/auth/login', {
+    const data = await apiRequest<{ accessToken?: string; user?: User; requiresOtp?: boolean }>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
+    });
+
+    if (data.requiresOtp) {
+      return { requiresOtp: true };
+    }
+
+    if (data.accessToken && data.user) {
+      setAccessToken(data.accessToken);
+      setUser(data.user);
+    }
+    return { requiresOtp: false };
+  };
+
+  const loginWithGoogle = async (idToken: string) => {
+    const data = await apiRequest<{ accessToken: string; user: User }>('/api/auth/google', {
+      method: 'POST',
+      body: JSON.stringify({ idToken }),
     });
     setAccessToken(data.accessToken);
     setUser(data.user);
@@ -82,7 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, logoutAll }}>
+    <AuthContext.Provider value={{ user, loading, login, setSession, loginWithGoogle, register, logout, logoutAll }}>
       {children}
     </AuthContext.Provider>
   );

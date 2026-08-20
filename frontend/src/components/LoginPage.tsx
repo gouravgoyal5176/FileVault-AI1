@@ -1,19 +1,22 @@
 import { useState, FormEvent } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, User } from '../context/AuthContext';
 import { Lock, Mail, ShieldAlert, ArrowRight, Eye, EyeOff, ShieldCheck } from 'lucide-react';
+import { GoogleAuthButton } from './GoogleAuthButton';
+import { LoginOtpModal } from './LoginOtpModal';
 
 interface LoginPageProps {
   onSwitchToRegister: () => void;
 }
 
 export function LoginPage({ onSwitchToRegister }: LoginPageProps) {
-  const { login } = useAuth();
+  const { login, setSession, loginWithGoogle } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [details, setDetails] = useState<string[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const [isOtpModalOpen, setIsOtpModalOpen] = useState(false);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -22,7 +25,10 @@ export function LoginPage({ onSwitchToRegister }: LoginPageProps) {
     setLoading(true);
 
     try {
-      await login(email, password);
+      const res = await login(email, password);
+      if (res && res.requiresOtp) {
+        setIsOtpModalOpen(true);
+      }
     } catch (err: any) {
       setError(err.message || 'Login failed');
       if (err.details && Array.isArray(err.details)) {
@@ -33,10 +39,29 @@ export function LoginPage({ onSwitchToRegister }: LoginPageProps) {
     }
   };
 
+  const handleLoginSuccess = (accessToken: string, user: User) => {
+    setIsOtpModalOpen(false);
+    setSession(accessToken, user);
+  };
+
+  const handleGoogleSuccess = async (idToken: string) => {
+    setError(null);
+    setDetails(null);
+    setLoading(true);
+
+    try {
+      await loginWithGoogle(idToken);
+    } catch (err: any) {
+      setError(err.message || 'Google authentication failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50/30 to-slate-100 flex items-center justify-center p-4 font-sans select-none">
       <div className="w-full max-w-md">
-        <div className="bg-white border border-slate-200/80 rounded-3xl p-8 shadow-xl shadow-slate-200/50 space-y-6">
+        <div className="bg-white border border-slate-200/80 rounded-3xl p-6 sm:p-8 shadow-xl shadow-slate-200/50 space-y-6">
           <div className="text-center space-y-2">
             <div className="inline-flex p-3 bg-indigo-50 border border-indigo-100 text-indigo-600 rounded-2xl mb-1 shadow-xs">
               <ShieldCheck className="w-8 h-8 stroke-[2.2]" />
@@ -104,12 +129,29 @@ export function LoginPage({ onSwitchToRegister }: LoginPageProps) {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold text-xs rounded-xl shadow-md shadow-indigo-600/20 transition-all duration-200 flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-95 cursor-pointer disabled:opacity-50"
+              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold text-xs rounded-xl shadow-md shadow-indigo-600/20 transition-all duration-200 flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-95 cursor-pointer disabled:opacity-50 min-h-[44px]"
             >
               {loading ? 'Authenticating...' : 'Sign In to Vault'}
               <ArrowRight className="w-4 h-4 stroke-[2.5]" />
             </button>
           </form>
+
+          {/* Social / GIS Auth Divider */}
+          <div className="relative my-4">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-slate-200"></div>
+            </div>
+            <div className="relative flex justify-center text-[10px] uppercase font-bold text-slate-400">
+              <span className="bg-white px-3">Or continue with</span>
+            </div>
+          </div>
+
+          {/* Google Identity Services Button */}
+          <GoogleAuthButton
+            buttonText="continue_with"
+            onSuccess={handleGoogleSuccess}
+            onError={(errMsg) => setError(errMsg)}
+          />
 
           <div className="pt-4 border-t border-slate-100 text-center">
             <p className="text-xs text-slate-500">
@@ -124,6 +166,14 @@ export function LoginPage({ onSwitchToRegister }: LoginPageProps) {
           </div>
         </div>
       </div>
+
+      {/* Login MFA Verification OTP Modal */}
+      <LoginOtpModal
+        isOpen={isOtpModalOpen}
+        email={email}
+        onSuccess={handleLoginSuccess}
+        onClose={() => setIsOtpModalOpen(false)}
+      />
     </div>
   );
 }

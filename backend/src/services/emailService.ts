@@ -170,3 +170,233 @@ export async function sendShareNotificationEmail(
     };
   }
 }
+
+export interface RegistrationOtpInput {
+  recipientEmail: string;
+  otp: string;
+}
+
+export function generateOtpEmailHtml(input: RegistrationOtpInput): string {
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>FileVault AI — Verification Code</title>
+</head>
+<body style="margin:0; padding:0; background-color:#f8fafc; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color:#0f172a;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#f8fafc; padding: 40px 15px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" style="max-width:500px; background-color:#ffffff; border:1px solid #e2e8f0; border-radius:16px; overflow:hidden; box-shadow:0 10px 25px -5px rgba(0,0,0,0.05);">
+          
+          <!-- Header -->
+          <tr>
+            <td style="background-color:#4f46e5; padding: 24px 32px; text-align: left;">
+              <span style="font-size:20px; font-weight:800; color:#ffffff; letter-spacing:-0.5px;">FileVault AI</span>
+              <span style="display:inline-block; margin-left:8px; padding:2px 8px; background-color:rgba(255,255,255,0.2); border-radius:6px; font-size:10px; font-weight:700; color:#ffffff; text-transform:uppercase;">Identity Verification</span>
+            </td>
+          </tr>
+
+          <!-- Main Content -->
+          <tr>
+            <td style="padding: 32px;">
+              <h2 style="margin:0 0 12px 0; font-size:18px; font-weight:800; color:#0f172a;">Verify Your Email Address</h2>
+              <p style="margin:0 0 24px 0; font-size:14px; color:#475569; line-height:1.5;">
+                Please use the 6-digit verification code below to complete your registration for account <strong style="color:#0f172a;">${input.recipientEmail}</strong>.
+              </p>
+
+              <!-- OTP Code Display -->
+              <table width="100%" cellspacing="0" cellpadding="0" style="margin-bottom:24px;">
+                <tr>
+                  <td align="center" style="background-color:#f1f5f9; border:2px dashed #cbd5e1; border-radius:12px; padding:20px;">
+                    <div style="font-size:32px; font-weight:900; letter-spacing:10px; color:#4f46e5; font-mono;">${input.otp}</div>
+                    <div style="font-size:11px; font-weight:600; color:#64748b; margin-top:6px; text-transform:uppercase; letter-spacing:1px;">Expires in 5 minutes</div>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Security Notice -->
+              <table width="100%" cellspacing="0" cellpadding="0" style="background-color:#fffbe0; border:1px solid #fde047; border-radius:10px; padding:12px 16px;">
+                <tr>
+                  <td>
+                    <span style="font-size:11px; font-weight:700; color:#854d0e; text-transform:uppercase;">🔒 Security Notice</span>
+                    <p style="margin:4px 0 0 0; font-size:12px; color:#713f12; line-height:1.4;">
+                      If you did not request this verification code, please ignore this email. Never share this code with anyone. FileVault AI staff will never ask for your verification code.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#f1f5f9; padding: 16px 32px; text-align: center; border-top: 1px solid #e2e8f0;">
+              <p style="margin:0; font-size:11px; color:#64748b;">
+                © FileVault AI — Military-Grade Encrypted Cloud Storage System
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `.trim();
+}
+
+export async function sendRegistrationOtpEmail(
+  input: RegistrationOtpInput
+): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  if (!isSmtpConfigured()) {
+    console.warn(`[SMTP WARN] Cannot send registration OTP to ${input.recipientEmail}: SMTP_USER or SMTP_PASS not set.`);
+    return {
+      success: false,
+      error: 'SMTP credentials (SMTP_USER / SMTP_PASS) not configured on backend server.',
+    };
+  }
+
+  try {
+    const sender = getSmtpSenderEmail();
+    const html = generateOtpEmailHtml(input);
+
+    const mailOptions = {
+      from: `"FileVault AI" <${sender}>`,
+      to: input.recipientEmail,
+      subject: `FileVault AI — Registration Verification Code (${input.otp})`,
+      html,
+    };
+
+    const info = await smtpTransport.sendMail(mailOptions);
+    console.log(`[SMTP SUCCESS] Registration OTP email delivered to ${input.recipientEmail}. MessageId: ${info.messageId}`);
+    return {
+      success: true,
+      messageId: info.messageId,
+    };
+  } catch (error: any) {
+    console.error(`[SMTP ERROR] Failed to send registration OTP email to ${input.recipientEmail}:`, error.message);
+    return {
+      success: false,
+      error: error.message || 'Failed to dispatch email via SMTP.',
+    };
+  }
+}
+
+export interface LoginOtpInput {
+  recipientEmail: string;
+  otp: string;
+}
+
+export function generateLoginOtpEmailHtml(input: LoginOtpInput): string {
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>FileVault AI — Login Verification Code</title>
+</head>
+<body style="margin:0; padding:0; background-color:#f8fafc; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color:#0f172a;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#f8fafc; padding: 40px 15px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" style="max-width:500px; background-color:#ffffff; border:1px solid #e2e8f0; border-radius:16px; overflow:hidden; box-shadow:0 10px 25px -5px rgba(0,0,0,0.05);">
+          
+          <!-- Header -->
+          <tr>
+            <td style="background-color:#4f46e5; padding: 24px 32px; text-align: left;">
+              <span style="font-size:20px; font-weight:800; color:#ffffff; letter-spacing:-0.5px;">FileVault AI</span>
+              <span style="display:inline-block; margin-left:8px; padding:2px 8px; background-color:rgba(255,255,255,0.2); border-radius:6px; font-size:10px; font-weight:700; color:#ffffff; text-transform:uppercase;">Login MFA Verification</span>
+            </td>
+          </tr>
+
+          <!-- Main Content -->
+          <tr>
+            <td style="padding: 32px;">
+              <h2 style="margin:0 0 12px 0; font-size:18px; font-weight:800; color:#0f172a;">Verify Your Vault Login</h2>
+              <p style="margin:0 0 24px 0; font-size:14px; color:#475569; line-height:1.5;">
+                A sign-in attempt was initiated for your vault account <strong style="color:#0f172a;">${input.recipientEmail}</strong>. Please use the 6-digit MFA verification code below to complete your login.
+              </p>
+
+              <!-- OTP Code Display -->
+              <table width="100%" cellspacing="0" cellpadding="0" style="margin-bottom:24px;">
+                <tr>
+                  <td align="center" style="background-color:#f1f5f9; border:2px dashed #cbd5e1; border-radius:12px; padding:20px;">
+                    <div style="font-size:32px; font-weight:900; letter-spacing:10px; color:#4f46e5; font-mono;">${input.otp}</div>
+                    <div style="font-size:11px; font-weight:600; color:#64748b; margin-top:6px; text-transform:uppercase; letter-spacing:1px;">Expires in 5 minutes</div>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Security Notice -->
+              <table width="100%" cellspacing="0" cellpadding="0" style="background-color:#fffbe0; border:1px solid #fde047; border-radius:10px; padding:12px 16px;">
+                <tr>
+                  <td>
+                    <span style="font-size:11px; font-weight:700; color:#854d0e; text-transform:uppercase;">🔒 Security Alert</span>
+                    <p style="margin:4px 0 0 0; font-size:12px; color:#713f12; line-height:1.4;">
+                      If you did not initiate this login request, your account password may be compromised. Please reset your password immediately. Never share this code with anyone.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#f1f5f9; padding: 16px 32px; text-align: center; border-top: 1px solid #e2e8f0;">
+              <p style="margin:0; font-size:11px; color:#64748b;">
+                © FileVault AI — Military-Grade Encrypted Cloud Storage System
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `.trim();
+}
+
+export async function sendLoginOtpEmail(
+  input: LoginOtpInput
+): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  if (!isSmtpConfigured()) {
+    console.warn(`[SMTP WARN] Cannot send login OTP to ${input.recipientEmail}: SMTP_USER or SMTP_PASS not set.`);
+    return {
+      success: false,
+      error: 'SMTP credentials (SMTP_USER / SMTP_PASS) not configured on backend server.',
+    };
+  }
+
+  try {
+    const sender = getSmtpSenderEmail();
+    const html = generateLoginOtpEmailHtml(input);
+
+    const mailOptions = {
+      from: `"FileVault AI" <${sender}>`,
+      to: input.recipientEmail,
+      subject: `FileVault AI — Login Verification Code (${input.otp})`,
+      html,
+    };
+
+    const info = await smtpTransport.sendMail(mailOptions);
+    console.log(`[SMTP SUCCESS] Login OTP email delivered to ${input.recipientEmail}. MessageId: ${info.messageId}`);
+    return {
+      success: true,
+      messageId: info.messageId,
+    };
+  } catch (error: any) {
+    console.error(`[SMTP ERROR] Failed to send login OTP email to ${input.recipientEmail}:`, error.message);
+    return {
+      success: false,
+      error: error.message || 'Failed to dispatch email via SMTP.',
+    };
+  }
+}

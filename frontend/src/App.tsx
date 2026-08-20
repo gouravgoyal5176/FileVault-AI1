@@ -1,277 +1,277 @@
-import { useState, useEffect } from 'react';
-import { useAuth } from './context/AuthContext';
-import { apiRequest } from './api/apiClient';
-import { LoginPage } from './components/LoginPage';
-import { RegisterPage } from './components/RegisterPage';
-import { DashboardLayout } from './layout/DashboardLayout';
-import { HeroBanner } from './components/dashboard/HeroBanner';
-import { StorageCard } from './components/dashboard/StorageCard';
-import { SecurityScoreCard } from './components/dashboard/SecurityScoreCard';
-import { ThreatLevelCard } from './components/dashboard/ThreatLevelCard';
-import { QuickActions } from './components/dashboard/QuickActions';
-import { ActivityTimeline } from './components/dashboard/ActivityTimeline';
-import { SecurityStatusWidget } from './components/widgets/SecurityStatusWidget';
-import { FileList, FileItem } from './components/FileList';
-import { SharedWithMe } from './components/SharedWithMe';
-import { SecurityCenter } from './components/SecurityCenter';
-import { ThreatAlertsWidget } from './components/ThreatAlertsWidget';
-import { AnomalyMonitorWidget } from './components/AnomalyMonitorWidget';
-import { FileUploadModal } from './components/FileUploadModal';
-import { FileDetailsModal } from './components/FileDetailsModal';
-import { ShareFileModal } from './components/ShareFileModal';
-import { AdminDashboard } from './components/pages/AdminDashboard';
-import { SettingsPage } from './components/pages/SettingsPage';
-import { NavTab } from './layout/Sidebar';
+import React, { useState, useEffect } from 'react';
+import { ThemeMode, QuizResult, QuizSettings } from './types/quiz';
+import { getAvailableWeeks, getWeekByNumber, getRandomQuestions, getAllQuestions, getCourseStats } from './data/weeks';
+import { Navbar } from './components/layout/Navbar';
+import { Footer } from './components/layout/Footer';
+import { HeroSection } from './components/home/HeroSection';
+import { CourseOverview } from './components/home/CourseOverview';
+import { LearningJourney } from './components/home/LearningJourney';
+import { WeekDetailView } from './components/weeks/WeekDetailView';
+import { PracticeZone } from './components/practice/PracticeZone';
+import { QuizEngine } from './components/quiz/QuizEngine';
+import { QuizResultView } from './components/quiz/QuizResultView';
+import { ReviewAnswersView } from './components/quiz/ReviewAnswersView';
+import { BookmarksView } from './components/bookmarks/BookmarksView';
+import { BookOpen, Sparkles, Target } from 'lucide-react';
 
-export function App() {
-  const { user, loading: authLoading } = useAuth();
-  const [authView, setAuthView] = useState<'login' | 'register'>('login');
-  const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
+export const App: React.FC = () => {
+  // Navigation View State
+  const [currentView, setCurrentView] = useState<string>('home');
+  const [selectedWeekNum, setSelectedWeekNum] = useState<number>(1);
 
-  const [files, setFiles] = useState<FileItem[]>([]);
-  const [filesLoading, setFilesLoading] = useState<boolean>(true);
+  // Theme State with LocalStorage Persistence
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    const saved = localStorage.getItem('mindprep_theme');
+    return (saved as ThemeMode) || 'dark';
+  });
 
-  const [threatSummary, setThreatSummary] = useState<any>(null);
-  const [threatLoading, setThreatLoading] = useState<boolean>(true);
-
-  const [scoreData, setScoreData] = useState<any>(null);
-  const [scoreLoading, setScoreLoading] = useState<boolean>(true);
-
-  const [recentLogs, setRecentLogs] = useState<any[]>([]);
-  const [logsLoading, setLogsLoading] = useState<boolean>(true);
-
-  const [searchQuery, setSearchQuery] = useState<string>('');
-
-  // Modals state
-  const [isUploadOpen, setIsUploadOpen] = useState<boolean>(false);
-  const [selectedDetailsId, setSelectedDetailsId] = useState<string | null>(null);
-  const [selectedShareFile, setSelectedShareFile] = useState<FileItem | null>(null);
-
-  const fetchFiles = async () => {
-    if (!user) return;
-    setFilesLoading(true);
+  // Bookmarks State with LocalStorage Persistence
+  const [bookmarks, setBookmarks] = useState<string[]>(() => {
     try {
-      const data = await apiRequest<{ files: FileItem[] }>('/api/files');
-      setFiles(data.files);
-    } catch (err) {
-      // Ignore
-    } finally {
-      setFilesLoading(false);
+      const saved = localStorage.getItem('mindprep_bookmarks');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
     }
-  };
+  });
 
-  const fetchThreatSummary = async () => {
-    if (!user) return;
-    setThreatLoading(true);
-    try {
-      const data = await apiRequest<any>('/api/threats/summary');
-      setThreatSummary(data);
-    } catch (err) {
-      // Ignore
-    } finally {
-      setThreatLoading(false);
-    }
-  };
+  // Active Quiz State
+  const [quizQuestions, setQuizQuestions] = useState<any[]>([]);
+  const [quizSettings, setQuizSettings] = useState<QuizSettings | null>(null);
+  const [lastQuizResult, setLastQuizResult] = useState<QuizResult | null>(null);
 
-  const fetchScore = async () => {
-    if (!user) return;
-    setScoreLoading(true);
-    try {
-      const data = await apiRequest<any>('/api/security-center/score');
-      setScoreData(data);
-    } catch (err) {
-      // Ignore
-    } finally {
-      setScoreLoading(false);
-    }
-  };
-
-  const fetchRecentLogs = async () => {
-    if (!user) return;
-    setLogsLoading(true);
-    try {
-      const data = await apiRequest<{ logs: any[] }>('/api/security-center/audit-logs?limit=5');
-      setRecentLogs(data.logs);
-    } catch (err) {
-      // Ignore
-    } finally {
-      setLogsLoading(false);
-    }
-  };
-
-  const refreshAllData = () => {
-    fetchFiles();
-    fetchThreatSummary();
-    fetchScore();
-    fetchRecentLogs();
-  };
-
+  // Apply Theme Class to Document Body / Root
   useEffect(() => {
-    if (user) {
-      refreshAllData();
+    const root = document.documentElement;
+    if (theme === 'light') {
+      root.classList.add('light');
+      root.classList.remove('dark');
+    } else {
+      root.classList.add('dark');
+      root.classList.remove('light');
     }
-  }, [user]);
+    localStorage.setItem('mindprep_theme', theme);
+  }, [theme]);
 
-  const handleDeleteFile = async (fileId: string) => {
-    if (!confirm('Are you sure you want to permanently delete this encrypted file?')) return;
-    try {
-      await apiRequest(`/api/files/${fileId}`, { method: 'DELETE' });
-      refreshAllData();
-    } catch (err: any) {
-      alert(`Delete failed: ${err.message}`);
-    }
+  // Persist Bookmarks
+  useEffect(() => {
+    localStorage.setItem('mindprep_bookmarks', JSON.stringify(bookmarks));
+  }, [bookmarks]);
+
+  const handleToggleTheme = () => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   };
 
-  const totalVaultBytes = files.reduce((acc, f) => acc + f.size, 0);
-
-  if (authLoading) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center font-sans text-slate-400 text-xs">
-        <div className="flex items-center gap-3">
-          <div className="w-5 h-5 rounded-full border-2 border-indigo-600 border-t-transparent animate-spin" />
-          <span>Verifying encrypted session...</span>
-        </div>
-      </div>
+  const handleToggleBookmark = (questionId: string) => {
+    setBookmarks((prev) =>
+      prev.includes(questionId)
+        ? prev.filter((id) => id !== questionId)
+        : [...prev, questionId]
     );
-  }
+  };
 
-  if (!user) {
-    return authView === 'login' ? (
-      <LoginPage onSwitchToRegister={() => setAuthView('register')} />
-    ) : (
-      <RegisterPage onSwitchToLogin={() => setAuthView('login')} />
-    );
-  }
+  const handleNavigate = (view: string, param?: any) => {
+    if (view === 'week-detail' && typeof param === 'number') {
+      setSelectedWeekNum(param);
+    }
+    setCurrentView(view);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Launch Practice Quiz
+  const handleStartQuiz = (settings: QuizSettings) => {
+    setQuizSettings(settings);
+
+    let questionsToUse: any[] = [];
+    if (settings.mode === 'week' && settings.selectedWeeks.length > 0) {
+      const weekData = getWeekByNumber(settings.selectedWeeks[0]);
+      questionsToUse = weekData ? [...weekData.questions] : [];
+    } else {
+      questionsToUse = getRandomQuestions(settings.questionCount, settings.selectedWeeks);
+    }
+
+    if (!questionsToUse.length) {
+      questionsToUse = getAllQuestions();
+    }
+
+    setQuizQuestions(questionsToUse);
+    setCurrentView('quiz');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleStartWeekQuiz = (weekNum: number) => {
+    const weekData = getWeekByNumber(weekNum);
+    if (!weekData) return;
+
+    handleStartQuiz({
+      mode: 'week',
+      selectedWeeks: [weekNum],
+      questionCount: weekData.questions.length,
+      timerEnabled: true,
+      timeLimitMinutes: 15,
+    });
+  };
+
+  const handleCompleteQuiz = (result: QuizResult) => {
+    setLastQuizResult(result);
+    setCurrentView('quiz-result');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const availableWeeks = getAvailableWeeks();
+  const courseStats = getCourseStats();
 
   return (
-    <DashboardLayout
-      activeTab={activeTab}
-      setActiveTab={setActiveTab}
-      onOpenUpload={() => setIsUploadOpen(true)}
-      searchQuery={searchQuery}
-      setSearchQuery={setSearchQuery}
-    >
-      {activeTab === 'dashboard' && (
-        <div className="space-y-6">
-          {/* Hero Banner */}
-          <HeroBanner
-            onOpenUpload={() => setIsUploadOpen(true)}
-            onNavigateSecurity={() => setActiveTab('security')}
-          />
+    <div className="min-h-screen flex flex-col bg-[#070A12] text-slate-100 dark:bg-[#070A12] dark:text-slate-100 light:bg-slate-50 light:text-slate-900 transition-colors duration-300">
+      
+      {/* Global Navbar */}
+      <Navbar
+        currentView={currentView}
+        onNavigate={handleNavigate}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
+        bookmarkCount={bookmarks.length}
+        availableWeeksCount={availableWeeks.length}
+      />
 
-          {/* Key Metrics Cards Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            <StorageCard totalBytes={totalVaultBytes} fileCount={files.length} />
-            <SecurityScoreCard
-              score={scoreData}
-              loading={scoreLoading}
-              onRefresh={fetchScore}
-              onNavigateSecurity={() => setActiveTab('security')}
+      {/* Main Content Router View */}
+      <main className="flex-1">
+        {currentView === 'home' && (
+          <div>
+            <HeroSection
+              onExploreWeeks={() => handleNavigate('weeks')}
+              onStartPractice={() => handleNavigate('practice')}
+              availableWeeksCount={courseStats.availableWeeksCount}
+              totalQuestionsCount={courseStats.totalQuestionsCount}
             />
-            <ThreatLevelCard
-              summary={threatSummary}
-              loading={threatLoading}
-              onRefresh={fetchThreatSummary}
-              onNavigateThreats={() => setActiveTab('threats')}
+
+            <CourseOverview />
+
+            <LearningJourney
+              onSelectWeek={(weekNum) => handleNavigate('week-detail', weekNum)}
             />
-          </div>
 
-          {/* Quick Actions */}
-          <QuickActions
-            onOpenUpload={() => setIsUploadOpen(true)}
-            onRefresh={refreshAllData}
-            onNavigateSecurity={() => setActiveTab('security')}
-          />
+            {/* Why Study Here / Features Section */}
+            <section className="py-16 border-t border-indigo-500/10 bg-[#090E1B]/50 dark:bg-[#090E1B]/50 light:bg-slate-100/60 light:border-slate-200">
+              <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+                <div className="text-center max-w-2xl mx-auto mb-12">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-indigo-400">
+                    PLATFORM ADVANTAGES
+                  </span>
+                  <h2 className="text-2xl sm:text-3xl font-extrabold text-white mt-1 dark:text-white light:text-slate-900">
+                    Built Specifically for NPTEL Students
+                  </h2>
+                </div>
 
-          {/* AI Behaviour Anomaly Engine */}
-          <AnomalyMonitorWidget />
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="glass-panel p-6 rounded-2xl border border-indigo-500/15">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500/20 text-indigo-400 mb-4">
+                      <BookOpen className="h-5 w-5" />
+                    </div>
+                    <h3 className="text-lg font-bold text-white mb-2 dark:text-white light:text-slate-900">
+                      Week-by-Week Breakdown
+                    </h3>
+                    <p className="text-xs text-slate-300 dark:text-slate-300 light:text-slate-600 leading-relaxed">
+                      All questions are neatly categorized by NPTEL course weeks so you can study along with your lecture releases.
+                    </p>
+                  </div>
 
-          {/* Files Preview & Recent Activity */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="font-extrabold text-slate-900 text-lg tracking-tight">Recent Encrypted Files</h3>
-                <button
-                  onClick={() => setActiveTab('vault')}
-                  className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition cursor-pointer"
-                >
-                  View All Files →
-                </button>
+                  <div className="glass-panel p-6 rounded-2xl border border-indigo-500/15">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-500/20 text-teal-400 mb-4">
+                      <Sparkles className="h-5 w-5" />
+                    </div>
+                    <h3 className="text-lg font-bold text-white mb-2 dark:text-white light:text-slate-900">
+                      Clear Explanations
+                    </h3>
+                    <p className="text-xs text-slate-300 dark:text-slate-300 light:text-slate-600 leading-relaxed">
+                      Every question includes detailed rationale explaining why the correct option is right and reinforcing key concepts.
+                    </p>
+                  </div>
+
+                  <div className="glass-panel p-6 rounded-2xl border border-indigo-500/15">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-500/20 text-violet-400 mb-4">
+                      <Target className="h-5 w-5" />
+                    </div>
+                    <h3 className="text-lg font-bold text-white mb-2 dark:text-white light:text-slate-900">
+                      Exam Practice Modes
+                    </h3>
+                    <p className="text-xs text-slate-300 dark:text-slate-300 light:text-slate-600 leading-relaxed">
+                      Test yourself under timed exam conditions, flag questions to review, and track your instant score accuracy.
+                    </p>
+                  </div>
+                </div>
               </div>
-              <FileList
-                files={files.slice(0, 5)}
-                loading={filesLoading}
-                onRefresh={refreshAllData}
-                onSelectDetails={(id) => setSelectedDetailsId(id)}
-                onSelectShare={(f) => setSelectedShareFile(f)}
-                onDelete={handleDeleteFile}
-                externalSearch={searchQuery}
-              />
-            </div>
-
-            <div>
-              <ActivityTimeline logs={recentLogs} loading={logsLoading} />
-            </div>
+            </section>
           </div>
+        )}
 
-          {/* Security Status Widget */}
-          <SecurityStatusWidget />
-        </div>
-      )}
-
-      {activeTab === 'vault' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="font-extrabold text-slate-900 text-xl tracking-tight">Encrypted Files Vault</h2>
-          </div>
-          <FileList
-            files={files}
-            loading={filesLoading}
-            onRefresh={refreshAllData}
-            onSelectDetails={(id) => setSelectedDetailsId(id)}
-            onSelectShare={(f) => setSelectedShareFile(f)}
-            onDelete={handleDeleteFile}
-            externalSearch={searchQuery}
+        {currentView === 'weeks' && (
+          <LearningJourney
+            onSelectWeek={(weekNum) => handleNavigate('week-detail', weekNum)}
           />
-        </div>
-      )}
+        )}
 
-      {activeTab === 'shared' && (
-        <SharedWithMe onSelectDetails={(id) => setSelectedDetailsId(id)} />
-      )}
+        {currentView === 'week-detail' && (
+          <WeekDetailView
+            weekData={getWeekByNumber(selectedWeekNum) || availableWeeks[0]}
+            onNavigate={handleNavigate}
+            onStartWeekQuiz={handleStartWeekQuiz}
+            bookmarks={bookmarks}
+            onToggleBookmark={handleToggleBookmark}
+          />
+        )}
 
-      {activeTab === 'security' && <SecurityCenter />}
+        {currentView === 'practice' && (
+          <PracticeZone onStartQuiz={handleStartQuiz} />
+        )}
 
-      {activeTab === 'threats' && (
-        <div className="space-y-6">
-          <ThreatAlertsWidget />
-          <AnomalyMonitorWidget />
-        </div>
-      )}
+        {currentView === 'quiz' && (
+          <QuizEngine
+            questions={quizQuestions}
+            timerEnabled={quizSettings?.timerEnabled ?? true}
+            timeLimitMinutes={quizSettings?.timeLimitMinutes ?? 15}
+            onCompleteQuiz={handleCompleteQuiz}
+            onCancelQuiz={() => handleNavigate('practice')}
+          />
+        )}
 
-      {activeTab === 'admin' && user.role === 'ADMIN' && <AdminDashboard />}
+        {currentView === 'quiz-result' && lastQuizResult && (
+          <QuizResultView
+            result={lastQuizResult}
+            onReviewAnswers={() => handleNavigate('review-answers')}
+            onTryAgain={() => handleStartQuiz(quizSettings || {
+              mode: 'random',
+              selectedWeeks: [],
+              questionCount: 10,
+              timerEnabled: true,
+              timeLimitMinutes: 15,
+            })}
+            onBackToPractice={() => handleNavigate('practice')}
+          />
+        )}
 
-      {activeTab === 'settings' && <SettingsPage />}
+        {currentView === 'review-answers' && lastQuizResult && (
+          <ReviewAnswersView
+            result={lastQuizResult}
+            onBackToResults={() => handleNavigate('quiz-result')}
+            onBackToPractice={() => handleNavigate('practice')}
+          />
+        )}
 
-      {/* Modals */}
-      <FileUploadModal
-        isOpen={isUploadOpen}
-        onClose={() => setIsUploadOpen(false)}
-        onUploadSuccess={refreshAllData}
-      />
+        {currentView === 'bookmarks' && (
+          <BookmarksView
+            bookmarks={bookmarks}
+            onToggleBookmark={handleToggleBookmark}
+            onNavigate={handleNavigate}
+          />
+        )}
+      </main>
 
-      <FileDetailsModal
-        fileId={selectedDetailsId}
-        onClose={() => setSelectedDetailsId(null)}
-      />
+      {/* Global Footer */}
+      <Footer onNavigate={handleNavigate} />
 
-      <ShareFileModal
-        fileId={selectedShareFile?.id || null}
-        filename={selectedShareFile?.originalFilename || ''}
-        onClose={() => setSelectedShareFile(null)}
-      />
-    </DashboardLayout>
+    </div>
   );
-}
+};
 
 export default App;

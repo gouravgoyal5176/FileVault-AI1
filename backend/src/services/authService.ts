@@ -3,8 +3,12 @@ import { prisma } from '../config/db';
 import { hashPassword, verifyPassword, hashToken, generateRandomToken } from '../utils/crypto';
 import { generateAccessToken } from '../utils/jwt';
 import { RegisterInput, LoginInput } from '../validators/authValidation';
-import { RiskLevel } from '@prisma/client';
+import { AuthProvider, RiskLevel, Role } from '@prisma/client';
 import { checkUnusualAccess } from './threatService';
+import { OAuth2Client } from 'google-auth-library';
+import { redisClient } from '../config/redis';
+import { sendRegistrationOtpEmail, sendLoginOtpEmail } from './emailService';
+import crypto from 'crypto';
 
 const REFRESH_TOKEN_EXPIRY_DAYS = 7;
 const MAX_FAILED_ATTEMPTS = 5;
@@ -44,6 +48,7 @@ export async function registerUser(input: RegisterInput, ipAddress: string, user
     data: {
       email: input.email.toLowerCase(),
       passwordHash,
+      emailVerified: true,
     },
     select: { id: true, email: true, role: true, createdAt: true },
   });
@@ -140,54 +145,30 @@ export async function loginUser(input: LoginInput, res: Response, ipAddress: str
     console.warn('Unusual access detection check warning:', err.message);
   }
 
-  // Successful Login — reset lockout & failed counters
-  await prisma.user.update({
-    where: { id: user.id },
-    data: {
-      failedLoginAttempts: 0,
-      lockoutUntil: null,
-      lastLoginIp: ipAddress,
-      lastLoginUserAgent: userAgent,
-      lastLoginAt: new Date(),
-    },
+  // Password verification succeeded! Generate Login MFA OTP
+  const otp = crypto.randomInt(100000, 999999).toString();
+  const hashedOtp = hashToken(otp);
+
+  // Store ONLY SHA-256 hash in Redis key login_otp:<email> with 5-minute (300s) TTL
+  await redisClient.set(`login_otp:${email}`, JSON.stringify({ hash: hashedOtp, attempts: 0 }), 'EX', 300);
+  // Set 60-second cooldown key
+  await redisClient.set(`login_otp_cooldown:${email}`, '1', 'EX', 60);
+
+  // Send Login OTP via Nodemailer SMTP
+  const mailResult = await sendLoginOtpEmail({
+    recipientEmail: email,
+    otp,
   });
 
-  // Log successful login
-  await prisma.activityLog.create({
-    data: {
-      userId: user.id,
-      actionType: 'LOGIN_SUCCESS',
-      ipAddress,
-      userAgent,
-      metadata: { role: user.role },
-    },
-  });
+  if (!mailResult.success) {
+    throw { statusCode: 500, message: `Failed to dispatch login verification email: ${mailResult.error}` };
+  }
 
-  // Generate tokens
-  const accessToken = generateAccessToken({ userId: user.id, role: user.role });
-  const rawRefreshToken = generateRandomToken(32);
-  const tokenHash = hashToken(rawRefreshToken);
-  const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
-
-  // Store hashed refresh token in DB
-  await prisma.refreshToken.create({
-    data: {
-      userId: user.id,
-      tokenHash,
-      expiresAt,
-    },
-  });
-
-  // Set httpOnly cookie
-  setRefreshTokenCookie(res, rawRefreshToken);
-
+  // DO NOT issue final JWT/session yet; return requiresOtp state
   return {
-    accessToken,
-    user: {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-    },
+    requiresOtp: true,
+    email: user.email,
+    message: 'Verification code sent to your email address.',
   };
 }
 
@@ -310,4 +291,353 @@ export async function logoutAllDevices(userId: string, res: Response) {
 
   clearRefreshTokenCookie(res);
   return { message: 'Logged out from all devices successfully.' };
+}
+
+export async function authenticateGoogleUser(
+  idToken: string,
+  res: Response,
+  ipAddress: string,
+  userAgent: string
+) {
+  if (!idToken) {
+    throw { statusCode: 400, message: 'Google ID token is required.' };
+  }
+
+  const googleClientId = process.env.GOOGLE_CLIENT_ID;
+  const googleClient = new OAuth2Client(googleClientId);
+
+  let payload;
+  try {
+    const ticket = await googleClient.verifyIdToken({
+      idToken,
+      audience: googleClientId || undefined,
+    });
+    payload = ticket.getPayload();
+  } catch (err: any) {
+    throw { statusCode: 401, message: `Invalid or expired Google ID token: ${err.message}` };
+  }
+
+  if (!payload) {
+    throw { statusCode: 401, message: 'Invalid Google ID token payload.' };
+  }
+
+  const sub = payload.sub;
+  const email = payload.email?.toLowerCase();
+  const emailVerified = payload.email_verified;
+
+  if (!email || emailVerified !== true) {
+    throw { statusCode: 401, message: 'Google authentication failed: Email is missing or unverified by Google.' };
+  }
+
+  // 1. Check if user already exists by googleId
+  let user = await prisma.user.findUnique({
+    where: { googleId: sub },
+  });
+
+  if (!user) {
+    // 2. Check if a LOCAL account with matching email exists
+    const existingEmailUser = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (existingEmailUser) {
+      // Link Google sub to existing account since Google email_verified === true
+      user = await prisma.user.update({
+        where: { id: existingEmailUser.id },
+        data: {
+          googleId: sub,
+          authProvider: existingEmailUser.authProvider === AuthProvider.LOCAL ? AuthProvider.HYBRID : existingEmailUser.authProvider,
+          emailVerified: true,
+        },
+      });
+
+      await prisma.activityLog.create({
+        data: {
+          userId: user.id,
+          actionType: 'GOOGLE_ACCOUNT_LINKED',
+          ipAddress,
+          userAgent,
+          metadata: { googleId: sub, email },
+        },
+      });
+    } else {
+      // 3. Create new user for Google login
+      const dummyPasswordHash = await hashPassword(generateRandomToken(32));
+      user = await prisma.user.create({
+        data: {
+          email,
+          passwordHash: dummyPasswordHash,
+          googleId: sub,
+          authProvider: AuthProvider.GOOGLE,
+          emailVerified: true,
+        },
+      });
+
+      await prisma.activityLog.create({
+        data: {
+          userId: user.id,
+          actionType: 'USER_REGISTERED_GOOGLE',
+          ipAddress,
+          userAgent,
+          metadata: { email, googleId: sub },
+        },
+      });
+    }
+  }
+
+  // Update lockout and login telemetry
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      failedLoginAttempts: 0,
+      lockoutUntil: null,
+      lastLoginIp: ipAddress,
+      lastLoginUserAgent: userAgent,
+      lastLoginAt: new Date(),
+    },
+  });
+
+  await prisma.activityLog.create({
+    data: {
+      userId: user.id,
+      actionType: 'LOGIN_SUCCESS_GOOGLE',
+      ipAddress,
+      userAgent,
+      metadata: { role: user.role, authProvider: user.authProvider },
+    },
+  });
+
+  // Issue standard tokens using existing session infrastructure
+  const accessToken = generateAccessToken({ userId: user.id, role: user.role });
+  const rawRefreshToken = generateRandomToken(32);
+  const tokenHash = hashToken(rawRefreshToken);
+  const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+
+  await prisma.refreshToken.create({
+    data: {
+      userId: user.id,
+      tokenHash,
+      expiresAt,
+    },
+  });
+
+  setRefreshTokenCookie(res, rawRefreshToken);
+
+  return {
+    accessToken,
+    user: {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      googleId: user.googleId,
+      authProvider: user.authProvider,
+      emailVerified: user.emailVerified,
+    },
+  };
+}
+
+export async function sendRegistrationOtp(emailInput: string) {
+  const email = emailInput.trim().toLowerCase();
+  const cooldownKey = `otp_cooldown:${email}`;
+
+  // Check 60-second resend cooldown
+  const inCooldown = await redisClient.get(cooldownKey);
+  if (inCooldown) {
+    throw { statusCode: 429, message: 'Please wait 60 seconds before requesting another verification code.' };
+  }
+
+  // Generate 6-digit numeric OTP via cryptographically secure randomInt
+  const otp = crypto.randomInt(100000, 999999).toString();
+  const hashedOtp = hashToken(otp);
+
+  // Store ONLY SHA-256 hash in Redis with 5-minute (300s) TTL
+  await redisClient.set(`otp:${email}`, JSON.stringify({ hash: hashedOtp, attempts: 0 }), 'EX', 300);
+  // Set 60-second cooldown key
+  await redisClient.set(cooldownKey, '1', 'EX', 60);
+
+  // Send OTP via Nodemailer SMTP transport
+  const mailResult = await sendRegistrationOtpEmail({
+    recipientEmail: email,
+    otp,
+  });
+
+  if (!mailResult.success) {
+    throw { statusCode: 500, message: `Failed to dispatch verification email: ${mailResult.error}` };
+  }
+
+  return {
+    success: true,
+    message: 'Verification code sent to your email address.',
+  };
+}
+
+export async function verifyRegistrationOtp(emailInput: string, otpInput: string) {
+  const email = emailInput.trim().toLowerCase();
+  const otpKey = `otp:${email}`;
+  const recordStr = await redisClient.get(otpKey);
+
+  if (!recordStr) {
+    throw { statusCode: 400, message: 'Verification code expired or not found. Please request a new code.' };
+  }
+
+  const record = JSON.parse(recordStr);
+  const hashedInput = hashToken(otpInput.trim());
+
+  if (hashedInput === record.hash) {
+    // Delete OTP keys on successful verification
+    await redisClient.del(otpKey);
+    await redisClient.del(`otp_cooldown:${email}`);
+
+    // If user record already exists in DB, update emailVerified status
+    const existingUser = await prisma.user.findUnique({ where: { email } });
+    if (existingUser) {
+      await prisma.user.update({
+        where: { id: existingUser.id },
+        data: { emailVerified: true },
+      });
+    }
+
+    return {
+      verified: true,
+      message: 'Email verified successfully.',
+    };
+  }
+
+  // Increment failed attempt counter
+  const newAttempts = (record.attempts || 0) + 1;
+
+  if (newAttempts >= 3) {
+    await redisClient.del(otpKey);
+    throw { statusCode: 400, message: 'Maximum verification attempts exceeded. Verification code invalidated. Please request a new code.' };
+  }
+
+  const ttl = await redisClient.ttl(otpKey);
+  await redisClient.set(otpKey, JSON.stringify({ hash: record.hash, attempts: newAttempts }), 'EX', ttl > 0 ? ttl : 300);
+
+  throw {
+    statusCode: 400,
+    message: `Invalid verification code. Remaining attempts: ${3 - newAttempts}.`,
+  };
+}
+
+export async function sendLoginOtp(emailInput: string) {
+  const email = emailInput.trim().toLowerCase();
+  const user = await prisma.user.findUnique({ where: { email } });
+
+  if (!user) {
+    throw { statusCode: 404, message: 'User account not found.' };
+  }
+
+  const cooldownKey = `login_otp_cooldown:${email}`;
+  const inCooldown = await redisClient.get(cooldownKey);
+  if (inCooldown) {
+    throw { statusCode: 429, message: 'Please wait 60 seconds before requesting another verification code.' };
+  }
+
+  const otp = crypto.randomInt(100000, 999999).toString();
+  const hashedOtp = hashToken(otp);
+
+  await redisClient.set(`login_otp:${email}`, JSON.stringify({ hash: hashedOtp, attempts: 0 }), 'EX', 300);
+  await redisClient.set(cooldownKey, '1', 'EX', 60);
+
+  const mailResult = await sendLoginOtpEmail({ recipientEmail: email, otp });
+  if (!mailResult.success) {
+    throw { statusCode: 500, message: `Failed to dispatch login verification email: ${mailResult.error}` };
+  }
+
+  return { success: true, message: 'Verification code sent to your email address.' };
+}
+
+export async function verifyLoginOtp(
+  emailInput: string,
+  otpInput: string,
+  res: Response,
+  ipAddress: string,
+  userAgent: string
+) {
+  const email = emailInput.trim().toLowerCase();
+  const otpKey = `login_otp:${email}`;
+  const recordStr = await redisClient.get(otpKey);
+
+  if (!recordStr) {
+    throw { statusCode: 400, message: 'Verification code expired or not found. Please request a new code.' };
+  }
+
+  const record = JSON.parse(recordStr);
+  const hashedInput = hashToken(otpInput.trim());
+
+  if (hashedInput === record.hash) {
+    await redisClient.del(otpKey);
+    await redisClient.del(`login_otp_cooldown:${email}`);
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      throw { statusCode: 404, message: 'User account not found.' };
+    }
+
+    // Reset lockout counters & update login telemetry
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        failedLoginAttempts: 0,
+        lockoutUntil: null,
+        lastLoginIp: ipAddress,
+        lastLoginUserAgent: userAgent,
+        lastLoginAt: new Date(),
+      },
+    });
+
+    await prisma.activityLog.create({
+      data: {
+        userId: user.id,
+        actionType: 'LOGIN_SUCCESS_MFA',
+        ipAddress,
+        userAgent,
+        metadata: { role: user.role, authProvider: user.authProvider },
+      },
+    });
+
+    // Issue standard tokens using existing session infrastructure
+    const accessToken = generateAccessToken({ userId: user.id, role: user.role });
+    const rawRefreshToken = generateRandomToken(32);
+    const tokenHash = hashToken(rawRefreshToken);
+    const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+
+    await prisma.refreshToken.create({
+      data: {
+        userId: user.id,
+        tokenHash,
+        expiresAt,
+      },
+    });
+
+    setRefreshTokenCookie(res, rawRefreshToken);
+
+    return {
+      verified: true,
+      accessToken,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        googleId: user.googleId,
+        authProvider: user.authProvider,
+        emailVerified: user.emailVerified,
+      },
+    };
+  }
+
+  const newAttempts = (record.attempts || 0) + 1;
+  if (newAttempts >= 3) {
+    await redisClient.del(otpKey);
+    throw { statusCode: 400, message: 'Maximum verification attempts exceeded. Verification code invalidated. Please request a new code.' };
+  }
+
+  const ttl = await redisClient.ttl(otpKey);
+  await redisClient.set(otpKey, JSON.stringify({ hash: record.hash, attempts: newAttempts }), 'EX', ttl > 0 ? ttl : 300);
+
+  throw {
+    statusCode: 400,
+    message: `Invalid verification code. Remaining attempts: ${3 - newAttempts}.`,
+  };
 }
