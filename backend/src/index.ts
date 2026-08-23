@@ -16,6 +16,9 @@ import { fileRouter } from './routes/files';
 import { shareRouter } from './routes/shares';
 import { threatRouter } from './routes/threats';
 import { securityCenterRouter } from './routes/securityCenter';
+import { adminRouter } from './routes/admin';
+import { supportRouter } from './routes/support';
+import { userRouter } from './routes/users';
 import { initializeMinioBucket } from './config/minio';
 
 // Validate environment variables on startup
@@ -59,6 +62,9 @@ app.use('/api/files', fileRouter);
 app.use('/api/shares', shareRouter);
 app.use('/api/threats', threatRouter);
 app.use('/api/security-center', securityCenterRouter);
+app.use('/api/admin', adminRouter);
+app.use('/api/support', supportRouter);
+app.use('/api/users', userRouter);
 
 // Default root endpoint
 app.get('/', (_req: Request, res: Response) => {

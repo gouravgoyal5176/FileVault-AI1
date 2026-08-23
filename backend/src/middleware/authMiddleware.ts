@@ -27,14 +27,18 @@ export async function requireAuth(req: AuthRequest, res: Response, next: NextFun
       return res.status(401).json({ error: 'Invalid or expired access token.' });
     }
 
-    // Always re-derive role and existence directly from database
+    // Always re-derive role, status and existence directly from database
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
-      select: { id: true, email: true, role: true, lockoutUntil: true },
+      select: { id: true, email: true, role: true, status: true, lockoutUntil: true },
     });
 
     if (!user) {
       return res.status(401).json({ error: 'User account no longer exists.' });
+    }
+
+    if (user.status === 'SUSPENDED') {
+      return res.status(403).json({ error: 'Your account has been suspended by an administrator. Please contact support.' });
     }
 
     if (user.lockoutUntil && user.lockoutUntil > new Date()) {

@@ -8,10 +8,11 @@ import {
   Upload,
   Shield,
   Sliders,
-  LogOut
+  LogOut,
+  LifeBuoy
 } from 'lucide-react';
 
-export type NavTab = 'dashboard' | 'vault' | 'shared' | 'security' | 'threats' | 'admin' | 'settings';
+export type NavTab = 'dashboard' | 'vault' | 'shared' | 'security' | 'threats' | 'support' | 'admin' | 'settings';
 
 interface SidebarProps {
   activeTab: NavTab;
@@ -30,6 +31,7 @@ export function Sidebar({ activeTab, setActiveTab, onOpenUpload }: SidebarProps)
     { id: 'shared', label: 'Shared Files', icon: Share2 },
     { id: 'security', label: 'Security Center', icon: ShieldCheck },
     { id: 'threats', label: 'Threat Monitor', icon: ShieldAlert },
+    { id: 'support', label: 'Support Center', icon: LifeBuoy },
     { id: 'settings', label: 'Settings', icon: Sliders },
   ];
 

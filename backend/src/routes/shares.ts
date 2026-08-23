@@ -85,7 +85,7 @@ shareRouter.get('/shared-with-me', async (req: AuthRequest, res: Response) => {
       return res.status(401).json({ error: 'Authentication required' });
     }
 
-    const shares = await listFilesSharedWithUser(req.user.id);
+    const shares = await listFilesSharedWithUser(req.user.id, req.user.email);
     return res.status(200).json({ shares });
   } catch (error: any) {
     const statusCode = error.statusCode || 500;

@@ -27,7 +27,6 @@ export function GoogleAuthButton({
       return;
     }
 
-    // Load Google GIS script dynamically if not present
     if (window.google?.accounts?.id) {
       setScriptLoaded(true);
       return;
@@ -63,14 +62,13 @@ export function GoogleAuthButton({
         },
       });
 
-      // Clear previous button elements before rendering
       buttonRef.current.innerHTML = '';
       window.google.accounts.id.renderButton(buttonRef.current, {
-        theme: 'outline',
+        theme: 'filled_black',
         size: 'large',
         text: buttonText,
         shape: 'pill',
-        width: 380,
+        width: 360,
       });
     } catch (err: any) {
       onError(err.message || 'Failed to initialize Google Sign-In button');
@@ -84,7 +82,7 @@ export function GoogleAuthButton({
         onClick={() =>
           onError('Google Sign-In requires VITE_GOOGLE_CLIENT_ID to be configured in environment.')
         }
-        className="w-full py-2.5 px-4 bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold text-xs rounded-xl border border-slate-200 flex items-center justify-center gap-2.5 transition cursor-pointer"
+        className="w-full py-3 px-4 bg-[#090D16] hover:bg-[#111827] active:bg-[#1F2937] text-slate-200 font-semibold text-xs rounded-2xl border border-slate-800 shadow-md flex items-center justify-center gap-3 transition-all duration-200 cursor-pointer min-h-[44px]"
       >
         <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
           <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>

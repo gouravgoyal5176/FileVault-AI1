@@ -148,7 +148,7 @@ fileRouter.get('/:id', async (req: AuthRequest, res: Response) => {
     }
 
     const { ipAddress, userAgent } = getClientMeta(req);
-    const details = await getFileDetails(req.params.id, req.user.id, req.user.role, ipAddress, userAgent);
+    const details = await getFileDetails(req.params.id, req.user.id, req.user.role, ipAddress, userAgent, req.user.email);
     return res.status(200).json({ file: details });
   } catch (error: any) {
     const statusCode = error.statusCode || 500;
@@ -169,7 +169,8 @@ fileRouter.get('/:id/download', async (req: AuthRequest, res: Response) => {
       req.user.id,
       req.user.role,
       ipAddress,
-      userAgent
+      userAgent,
+      req.user.email
     );
 
     res.setHeader('Content-Type', downloadData.mimeType);

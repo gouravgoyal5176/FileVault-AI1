@@ -1,6 +1,7 @@
 import { useState, ReactNode } from 'react';
 import { Sidebar, NavTab } from './Sidebar';
 import { Navbar } from './Navbar';
+import { AppFooter } from '../components/AppFooter';
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -60,10 +61,7 @@ export function DashboardLayout({
           {children}
         </main>
 
-        {/* Persistent Global Footer Required by User */}
-        <footer className="border-t border-slate-200/80 bg-white px-6 py-4 text-center text-xs text-slate-500 font-medium select-none">
-          Made by Gourav Goyal, Saurabh Singh Rawat &amp; Bhaskar Raj Singh Thakur
-        </footer>
+        <AppFooter />
       </div>
     </div>
   );

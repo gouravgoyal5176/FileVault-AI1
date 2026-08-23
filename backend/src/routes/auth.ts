@@ -9,6 +9,7 @@ import {
 import {
   registerUser,
   loginUser,
+  adminLoginUser,
   sendLoginOtp,
   verifyLoginOtp,
   authenticateGoogleUser,
@@ -41,11 +42,12 @@ authRouter.post('/register', async (req: Request, res: Response) => {
     }
 
     const { ipAddress, userAgent } = getClientMeta(req);
-    const user = await registerUser(parseResult.data, ipAddress, userAgent);
+    const result = await registerUser(parseResult.data, res, ipAddress, userAgent);
 
     return res.status(201).json({
       message: 'Account created successfully.',
-      user,
+      accessToken: result.accessToken,
+      user: result.user,
     });
   } catch (error: any) {
     const statusCode = error.statusCode || 500;
@@ -72,6 +74,30 @@ authRouter.post('/login', async (req: Request, res: Response) => {
     const statusCode = error.statusCode || 500;
     return res.status(statusCode).json({
       error: error.message || 'Login failed',
+      lockoutUntil: error.lockoutUntil,
+    });
+  }
+});
+
+// POST /api/auth/admin/login (Dedicated Admin Authentication without OTP)
+authRouter.post('/admin/login', async (req: Request, res: Response) => {
+  try {
+    const parseResult = loginSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: parseResult.error.issues.map((i) => i.message),
+      });
+    }
+
+    const { ipAddress, userAgent } = getClientMeta(req);
+    const result = await adminLoginUser(parseResult.data, res, ipAddress, userAgent);
+
+    return res.status(200).json(result);
+  } catch (error: any) {
+    const statusCode = error.statusCode || 401;
+    return res.status(statusCode).json({
+      error: error.message || 'Admin authentication failed',
       lockoutUntil: error.lockoutUntil,
     });
   }

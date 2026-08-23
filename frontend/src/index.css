@@ -14,8 +14,8 @@
   }
 
   /* Light mode body overrides when .light is applied */
-  html.light body {
-    @apply bg-slate-50 text-slate-900;
+  html.light body, html:not(.dark) body {
+    @apply bg-[#F5F7FB] text-slate-900;
   }
 }
 
@@ -24,16 +24,16 @@
   @apply bg-[#0E1424]/80 backdrop-blur-md border border-indigo-500/15 shadow-xl shadow-black/20;
 }
 
-html.light .glass-panel {
-  @apply bg-white/90 backdrop-blur-md border border-slate-200/80 shadow-md shadow-slate-200/50;
+html.light .glass-panel, html:not(.dark) .glass-panel {
+  @apply bg-white/95 backdrop-blur-md border border-slate-200/90 shadow-md shadow-slate-200/50 text-slate-900;
 }
 
 .glass-card {
   @apply bg-[#121A2D]/70 backdrop-blur-sm border border-white/5 hover:border-indigo-500/30 transition-all duration-300;
 }
 
-html.light .glass-card {
-  @apply bg-white border border-slate-200 hover:border-indigo-300 hover:shadow-lg transition-all duration-300;
+html.light .glass-card, html:not(.dark) .glass-card {
+  @apply bg-white border border-slate-200/90 text-slate-900 hover:border-indigo-300 hover:shadow-lg transition-all duration-300;
 }
 
 /* Custom Scrollbars */

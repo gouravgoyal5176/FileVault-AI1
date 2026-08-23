@@ -14,9 +14,10 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<{ requiresOtp?: boolean }>;
+  adminLogin: (email: string, password: string) => Promise<void>;
   setSession: (accessToken: string, user: User) => void;
   loginWithGoogle: (idToken: string) => Promise<void>;
-  register: (email: string, password: string) => Promise<void>;
+  register: (email: string, password: string, otp?: string) => Promise<void>;
   logout: () => Promise<void>;
   logoutAll: () => Promise<void>;
 }
@@ -68,6 +69,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { requiresOtp: false };
   };
 
+  const adminLogin = async (email: string, password: string) => {
+    const data = await apiRequest<{ accessToken: string; user: User }>('/api/auth/admin/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+
+    if (data.accessToken && data.user) {
+      setAccessToken(data.accessToken);
+      setUser(data.user);
+    }
+  };
+
   const loginWithGoogle = async (idToken: string) => {
     const data = await apiRequest<{ accessToken: string; user: User }>('/api/auth/google', {
       method: 'POST',
@@ -77,13 +90,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(data.user);
   };
 
-  const register = async (email: string, password: string) => {
-    await apiRequest('/api/auth/register', {
+  const register = async (email: string, password: string, otp?: string) => {
+    const data = await apiRequest<{ accessToken: string; user: User }>('/api/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, otp }),
     });
-    // Auto-login after successful registration
-    await login(email, password);
+
+    if (data.accessToken && data.user) {
+      setAccessToken(data.accessToken);
+      setUser(data.user);
+    }
   };
 
   const logout = async () => {
@@ -109,7 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, setSession, loginWithGoogle, register, logout, logoutAll }}>
+    <AuthContext.Provider value={{ user, loading, login, adminLogin, setSession, loginWithGoogle, register, logout, logoutAll }}>
       {children}
     </AuthContext.Provider>
   );

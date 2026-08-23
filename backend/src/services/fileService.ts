@@ -36,7 +36,8 @@ export async function authorizeFileAccess(
   fileId: string,
   userId: string,
   userRole: Role,
-  requiredAccess: RequiredAccessLevel
+  requiredAccess: RequiredAccessLevel,
+  userEmail?: string
 ): Promise<AuthorizedAccessResult> {
   const file = await prisma.file.findUnique({
     where: { id: fileId },
@@ -65,13 +66,24 @@ export async function authorizeFileAccess(
     throw { statusCode: 403, message: 'Access denied. Only the file owner can perform this operation.' };
   }
 
-  // 3. Share Recipient access check
-  const share = await prisma.fileShare.findUnique({
-    where: {
-      fileId_sharedWithId: {
-        fileId: file.id,
-        sharedWithId: userId,
+  // 3. Share Recipient access check (robust ID or Email matching)
+  const normalizedEmail = userEmail?.trim().toLowerCase();
+  const shareRecipientConditions: any[] = [{ sharedWithId: userId }];
+  if (normalizedEmail) {
+    shareRecipientConditions.push({
+      sharedWith: {
+        email: {
+          equals: normalizedEmail,
+          mode: 'insensitive',
+        },
       },
+    });
+  }
+
+  const share = await prisma.fileShare.findFirst({
+    where: {
+      fileId: file.id,
+      OR: shareRecipientConditions,
     },
   });
 
@@ -200,10 +212,11 @@ export async function downloadFile(
   userId: string,
   userRole: Role,
   ipAddress: string,
-  userAgent: string
+  userAgent: string,
+  userEmail?: string
 ) {
   // Single Source of Truth Authorization
-  const { file } = await authorizeFileAccess(fileId, userId, userRole, 'DOWNLOAD');
+  const { file } = await authorizeFileAccess(fileId, userId, userRole, 'DOWNLOAD', userEmail);
 
   // Trigger Honeyfile Deception Trap if file is decoy honeyfile
   if (file.isHoneyfile) {
@@ -339,9 +352,10 @@ export async function getFileDetails(
   userId: string,
   userRole: Role,
   ipAddress: string = '127.0.0.1',
-  userAgent: string = 'Unknown'
+  userAgent: string = 'Unknown',
+  userEmail?: string
 ) {
-  const { file } = await authorizeFileAccess(fileId, userId, userRole, 'VIEW');
+  const { file } = await authorizeFileAccess(fileId, userId, userRole, 'VIEW', userEmail);
 
   // Trigger Honeyfile Deception Trap if file is decoy honeyfile
   if (file.isHoneyfile) {
@@ -572,10 +586,15 @@ export async function shareFile(
     throw { statusCode: 403, message: 'Only the file owner can grant sharing permissions.' };
   }
 
-  // Resolve recipient
+  // Resolve recipient using case-insensitive email lookup
   const targetEmail = recipientEmail.trim().toLowerCase();
-  const recipient = await prisma.user.findUnique({
-    where: { email: targetEmail },
+  const recipient = await prisma.user.findFirst({
+    where: {
+      email: {
+        equals: targetEmail,
+        mode: 'insensitive',
+      },
+    },
   });
 
   if (!recipient) {
@@ -692,13 +711,30 @@ export async function listFileShares(fileId: string, ownerId: string) {
   });
 }
 
-export async function listFilesSharedWithUser(userId: string) {
+export async function listFilesSharedWithUser(userId: string, userEmail?: string) {
   const now = new Date();
+  const normalizedEmail = userEmail?.trim().toLowerCase();
+
+  const shareRecipientConditions: any[] = [{ sharedWithId: userId }];
+  if (normalizedEmail) {
+    shareRecipientConditions.push({
+      sharedWith: {
+        email: {
+          equals: normalizedEmail,
+          mode: 'insensitive',
+        },
+      },
+    });
+  }
 
   const activeShares = await prisma.fileShare.findMany({
     where: {
-      sharedWithId: userId,
-      OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+      OR: shareRecipientConditions,
+      AND: [
+        {
+          OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+        },
+      ],
     },
     include: {
       file: {

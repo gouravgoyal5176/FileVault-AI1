@@ -3,7 +3,7 @@ import { prisma } from '../config/db';
 import { hashPassword, verifyPassword, hashToken, generateRandomToken } from '../utils/crypto';
 import { generateAccessToken } from '../utils/jwt';
 import { RegisterInput, LoginInput } from '../validators/authValidation';
-import { AuthProvider, RiskLevel, Role } from '@prisma/client';
+import { AuthProvider, RiskLevel, Role, UserStatus } from '@prisma/client';
 import { checkUnusualAccess } from './threatService';
 import { OAuth2Client } from 'google-auth-library';
 import { redisClient } from '../config/redis';
@@ -33,24 +33,57 @@ export function clearRefreshTokenCookie(res: Response) {
   });
 }
 
-export async function registerUser(input: RegisterInput, ipAddress: string, userAgent: string) {
-  const existingUser = await prisma.user.findUnique({
-    where: { email: input.email.toLowerCase() },
+export async function registerUser(
+  input: RegisterInput,
+  res: Response,
+  ipAddress: string,
+  userAgent: string
+) {
+  const email = input.email.trim().toLowerCase();
+
+  const existingUser = await prisma.user.findFirst({
+    where: { email: { equals: email, mode: 'insensitive' } },
   });
 
   if (existingUser) {
     throw { statusCode: 400, message: 'An account with this email already exists.' };
   }
 
+  // If OTP is provided in registration payload, verify against Redis
+  if (input.otp) {
+    const otpKey = `otp:${email}`;
+    const recordStr = await redisClient.get(otpKey);
+    if (!recordStr) {
+      throw { statusCode: 400, message: 'Verification code expired or not found. Please request a new code.' };
+    }
+    const record = JSON.parse(recordStr);
+    const hashedInput = hashToken(input.otp.trim());
+
+    if (hashedInput !== record.hash) {
+      const newAttempts = (record.attempts || 0) + 1;
+      if (newAttempts >= 3) {
+        await redisClient.del(otpKey);
+        throw { statusCode: 400, message: 'Maximum verification attempts exceeded. Verification code invalidated. Please request a new code.' };
+      }
+      const ttl = await redisClient.ttl(otpKey);
+      await redisClient.set(otpKey, JSON.stringify({ hash: record.hash, attempts: newAttempts }), 'EX', ttl > 0 ? ttl : 300);
+      throw { statusCode: 400, message: `Invalid verification code. Remaining attempts: ${3 - newAttempts}.` };
+    }
+
+    // Delete OTP keys on successful verification
+    await redisClient.del(otpKey);
+    await redisClient.del(`otp_cooldown:${email}`);
+  }
+
   const passwordHash = await hashPassword(input.password);
 
   const user = await prisma.user.create({
     data: {
-      email: input.email.toLowerCase(),
+      email,
       passwordHash,
       emailVerified: true,
     },
-    select: { id: true, email: true, role: true, createdAt: true },
+    select: { id: true, email: true, role: true, emailVerified: true, authProvider: true, googleId: true, createdAt: true },
   });
 
   // Log registration activity
@@ -64,7 +97,31 @@ export async function registerUser(input: RegisterInput, ipAddress: string, user
     },
   });
 
-  return user;
+  // Issue JWT access token (15m expiration)
+  const accessToken = generateAccessToken({
+    userId: user.id,
+    role: user.role,
+  });
+
+  // Generate & store Refresh Token (7-day expiration)
+  const rawRefreshToken = generateRandomToken(32);
+  const tokenHash = hashToken(rawRefreshToken);
+  const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+
+  await prisma.refreshToken.create({
+    data: {
+      userId: user.id,
+      tokenHash,
+      expiresAt,
+    },
+  });
+
+  setRefreshTokenCookie(res, rawRefreshToken);
+
+  return {
+    accessToken,
+    user,
+  };
 }
 
 export async function loginUser(input: LoginInput, res: Response, ipAddress: string, userAgent: string) {
@@ -72,6 +129,14 @@ export async function loginUser(input: LoginInput, res: Response, ipAddress: str
   const user = await prisma.user.findUnique({
     where: { email },
   });
+
+  // Check account suspension
+  if (user && user.status === 'SUSPENDED') {
+    throw {
+      statusCode: 403,
+      message: 'Your account has been suspended by an administrator. Please contact support.',
+    };
+  }
 
   // Check lockout on existing user
   if (user && user.lockoutUntil && user.lockoutUntil > new Date()) {
@@ -169,6 +234,153 @@ export async function loginUser(input: LoginInput, res: Response, ipAddress: str
     requiresOtp: true,
     email: user.email,
     message: 'Verification code sent to your email address.',
+  };
+}
+
+export async function adminLoginUser(input: LoginInput, res: Response, ipAddress: string, userAgent: string) {
+  const email = input.email.trim().toLowerCase();
+  
+  let user = await prisma.user.findUnique({
+    where: { email },
+  });
+
+  const envAdminEmail = (process.env.ADMIN_EMAIL || 'admin@filevault.ai').trim().toLowerCase();
+  const envAdminPassword = process.env.ADMIN_PASSWORD || 'AdminVault2026!';
+
+  // Bootstrap/Promote admin if logging in as envAdminEmail
+  if (email === envAdminEmail) {
+    if (!user) {
+      const passwordHash = await hashPassword(envAdminPassword);
+      user = await prisma.user.create({
+        data: {
+          email: envAdminEmail,
+          passwordHash,
+          role: Role.ADMIN,
+          status: UserStatus.ACTIVE,
+          emailVerified: true,
+        },
+      });
+    } else if (user.role !== Role.ADMIN) {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: { role: Role.ADMIN, status: UserStatus.ACTIVE, emailVerified: true },
+      });
+    }
+  }
+
+  if (!user) {
+    throw { statusCode: 401, message: 'Invalid admin email or password.' };
+  }
+
+  if (user.status === UserStatus.SUSPENDED) {
+    throw { statusCode: 403, message: 'Administrator account is suspended.' };
+  }
+
+  if (user.role !== Role.ADMIN) {
+    throw { statusCode: 403, message: 'Access denied. Account does not have administrative privileges.' };
+  }
+
+  if (user.lockoutUntil && user.lockoutUntil > new Date()) {
+    const remainingMins = Math.ceil((user.lockoutUntil.getTime() - Date.now()) / 60000);
+    throw {
+      statusCode: 403,
+      message: `Account is temporarily locked. Try again in ${remainingMins} minute(s).`,
+      lockoutUntil: user.lockoutUntil,
+    };
+  }
+
+  let validPassword = await verifyPassword(input.password, user.passwordHash);
+
+  // Fallback check if user was created before envAdminPassword changed
+  if (!validPassword && email === envAdminEmail && input.password === envAdminPassword) {
+    const newHash = await hashPassword(envAdminPassword);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: newHash },
+    });
+    validPassword = true;
+  }
+
+  if (!validPassword) {
+    const newFailedCount = user.failedLoginAttempts + 1;
+    let lockoutUntil: Date | undefined = undefined;
+
+    if (newFailedCount >= MAX_FAILED_ATTEMPTS) {
+      lockoutUntil = new Date(Date.now() + LOCKOUT_DURATION_MINUTES * 60 * 1000);
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        failedLoginAttempts: newFailedCount,
+        lockoutUntil,
+      },
+    });
+
+    await prisma.activityLog.create({
+      data: {
+        userId: user.id,
+        actionType: 'ADMIN_LOGIN_FAILED',
+        ipAddress,
+        userAgent,
+        metadata: { attemptCount: newFailedCount, lockedOut: !!lockoutUntil },
+      },
+    });
+
+    throw { statusCode: 401, message: 'Invalid admin email or password.' };
+  }
+
+  // Reset counters
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      failedLoginAttempts: 0,
+      lockoutUntil: null,
+      lastLoginAt: new Date(),
+      lastLoginIp: ipAddress,
+      lastLoginUserAgent: userAgent,
+    },
+  });
+
+  await prisma.activityLog.create({
+    data: {
+      userId: user.id,
+      actionType: 'ADMIN_LOGIN_SUCCESS',
+      ipAddress,
+      userAgent,
+      metadata: { email: user.email },
+    },
+  });
+
+  const accessToken = generateAccessToken({
+    userId: user.id,
+    role: Role.ADMIN,
+  });
+
+  const rawRefreshToken = generateRandomToken(32);
+  const tokenHash = hashToken(rawRefreshToken);
+  const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+
+  await prisma.refreshToken.create({
+    data: {
+      userId: user.id,
+      tokenHash,
+      expiresAt,
+    },
+  });
+
+  setRefreshTokenCookie(res, rawRefreshToken);
+
+  return {
+    accessToken,
+    user: {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      status: user.status,
+      authProvider: user.authProvider,
+      emailVerified: user.emailVerified,
+    },
   };
 }
 
@@ -335,9 +547,9 @@ export async function authenticateGoogleUser(
   });
 
   if (!user) {
-    // 2. Check if a LOCAL account with matching email exists
-    const existingEmailUser = await prisma.user.findUnique({
-      where: { email },
+    // 2. Check if a LOCAL account with matching email exists (case-insensitive)
+    const existingEmailUser = await prisma.user.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' } },
     });
 
     if (existingEmailUser) {
@@ -383,6 +595,13 @@ export async function authenticateGoogleUser(
         },
       });
     }
+  }
+
+  if (user.status === 'SUSPENDED') {
+    throw {
+      statusCode: 403,
+      message: 'Your account has been suspended by an administrator. Please contact support.',
+    };
   }
 
   // Update lockout and login telemetry

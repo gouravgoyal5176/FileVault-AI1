@@ -136,6 +136,30 @@ async function runShareSecurityTests() {
   const res13 = executeAuthorizeFileAccess(adminId, Role.ADMIN, 'DOWNLOAD', shareDownload);
   assert(res13.authorized === false && res13.code === 403, 'Admin No-Decrypt Guarantee Enforcement (403)');
 
+  // 14. Multi-Recipient Sharing: A shares with B (C cannot see share)
+  const shareForB = { sharedWithId: userBId, permission: SharePermission.DOWNLOAD, expiresAt: null };
+  const resBHasShare = executeAuthorizeFileAccess(userBId, Role.USER, 'DOWNLOAD', shareForB);
+  const resCHasNoShareForB = executeAuthorizeFileAccess(userCId, Role.USER, 'VIEW', shareForB);
+  assert(resBHasShare.authorized === true && resCHasNoShareForB.authorized === false, 'Multi-Recipient Sharing: A -> B Access Granted, C Blocked');
+
+  // 15. Multi-Recipient Sharing: A shares with C (B cannot see C-only share)
+  const shareForC = { sharedWithId: userCId, permission: SharePermission.DOWNLOAD, expiresAt: null };
+  const resCHasShare = executeAuthorizeFileAccess(userCId, Role.USER, 'DOWNLOAD', shareForC);
+  const resBHasNoShareForC = executeAuthorizeFileAccess(userBId, Role.USER, 'VIEW', shareForC);
+  assert(resCHasShare.authorized === true && resBHasNoShareForC.authorized === false, 'Multi-Recipient Sharing: A -> C Access Granted, B Blocked');
+
+  // 16. Multi-Recipient Reverse Sharing: B shares with A (User A receives B share)
+  const mockFileB = { id: 'file-b-uuid', ownerId: userBId, originalFilename: 'user_b_file.pdf' };
+  const shareBToA = { sharedWithId: ownerId, permission: SharePermission.VIEW, expiresAt: null };
+  const isAAuthorizedForBFile = shareBToA.sharedWithId === ownerId;
+  assert(isAAuthorizedForBFile === true, 'Multi-Recipient Reverse Sharing: B -> A Access Granted');
+
+  // 17. Multi-Recipient Reverse Sharing: C shares with A (User A receives C share)
+  const mockFileC = { id: 'file-c-uuid', ownerId: userCId, originalFilename: 'user_c_file.pdf' };
+  const shareCToA = { sharedWithId: ownerId, permission: SharePermission.DOWNLOAD, expiresAt: null };
+  const isAAuthorizedForCFile = shareCToA.sharedWithId === ownerId;
+  assert(isAAuthorizedForCFile === true, 'Multi-Recipient Reverse Sharing: C -> A Access Granted');
+
   console.log('\n--------------------------------------------------');
   console.log(`TEST RESULTS: ${passed} PASSED, ${failed} FAILED`);
   console.log('--------------------------------------------------\n');

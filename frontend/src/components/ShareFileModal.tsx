@@ -71,9 +71,9 @@ export function ShareFileModal({ fileId, filename, onClose }: ShareFileModalProp
       });
 
       if (response.emailSent) {
-        setSuccessMsg(`File shared successfully and notification email delivered to ${email}.`);
+        setSuccessMsg(`File shared successfully. Notification email submitted to ${email}.`);
       } else {
-        setWarningMsg(`File shared successfully, but notification email could not be delivered to ${email}.`);
+        setWarningMsg(`File shared successfully, but notification email could not be submitted to ${email}.`);
       }
 
       setEmail('');

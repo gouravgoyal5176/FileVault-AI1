@@ -35,6 +35,11 @@ enum AuthProvider {
   HYBRID
 }
 
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
 model User {
   id                  String       @id @default(uuid())
   email               String       @unique
@@ -43,6 +48,7 @@ model User {
   authProvider        AuthProvider @default(LOCAL)
   emailVerified       Boolean      @default(false)
   role                Role         @default(USER)
+  status              UserStatus   @default(ACTIVE)
   failedLoginAttempts Int          @default(0)
   lockoutUntil        DateTime?
   lastLoginIp         String?
@@ -58,7 +64,42 @@ model User {
   activityLogs           ActivityLog[]
   securityAlerts         SecurityAlert[]
   securityScoreSnapshots SecurityScoreSnapshot[]
+  supportTickets         SupportTicket[]
 }
+
+enum TicketCategory {
+  ACCOUNT_PROBLEM
+  LOGIN_PROBLEM
+  FILE_UPLOAD_PROBLEM
+  FILE_SHARING_PROBLEM
+  SECURITY_CONCERN
+  OTHER
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+model SupportTicket {
+  id          String         @id @default(uuid())
+  userId      String
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subject     String
+  category    TicketCategory @default(OTHER)
+  description String
+  status      TicketStatus   @default(OPEN)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([category])
+  @@index([createdAt])
+}
+
 
 model RefreshToken {
   id        String   @id @default(uuid())

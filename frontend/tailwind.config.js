@@ -40,5 +40,9 @@ export default {
       }
     },
   },
-  plugins: [],
+  plugins: [
+    function ({ addVariant }) {
+      addVariant('light', ['html.light &', 'html:not(.dark) &']);
+    },
+  ],
 }
