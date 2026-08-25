@@ -11,6 +11,9 @@ const envSchema = z.object({
   MINIO_ACCESS_KEY: z.string().min(1, 'MINIO_ACCESS_KEY is required'),
   MINIO_SECRET_KEY: z.string().min(1, 'MINIO_SECRET_KEY is required'),
   MINIO_BUCKET: z.string().default('filevault-vault'),
+  CLOUDINARY_CLOUD_NAME: z.string().min(1, 'CLOUDINARY_CLOUD_NAME is required'),
+CLOUDINARY_API_KEY: z.string().min(1, 'CLOUDINARY_API_KEY is required'),
+CLOUDINARY_API_SECRET: z.string().min(1, 'CLOUDINARY_API_SECRET is required'),
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),
   MASTER_ENCRYPTION_KEY: z.string().min(32, 'MASTER_ENCRYPTION_KEY must be at least 32 hex characters'),
 });

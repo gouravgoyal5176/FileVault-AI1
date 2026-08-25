@@ -1,5 +1,5 @@
 import { prisma } from '../config/db';
-import { minioClient, BUCKET_NAME } from '../config/minio';
+import cloudinary, { CLOUDINARY_FOLDER } from '../config/cloudinary';
 import {
   encryptEnvelope,
   decryptEnvelope,
@@ -142,20 +142,31 @@ export async function uploadFile(
 
   // Upload ONLY ciphertext to MinIO
   try {
-    await minioClient.putObject(
-      BUCKET_NAME,
-      storageKey,
-      cryptoData.ciphertext,
-      cryptoData.ciphertext.length,
-      {
-        'content-type': 'application/octet-stream',
-      }
-    );
-    console.log(`[Upload Pipeline] Ciphertext successfully uploaded to MinIO storage key "${storageKey}"`);
-  } catch (minioErr: any) {
-    console.error(`[Upload Pipeline ERROR] MinIO putObject failed for key "${storageKey}":`, minioErr.message);
-    throw { statusCode: 500, message: `Storage failure: ${minioErr.message}` };
-  }
+  await cloudinary.uploader.upload(
+    `data:application/octet-stream;base64,${cryptoData.ciphertext.toString('base64')}`,
+    {
+      resource_type: 'raw',
+      type: 'authenticated',
+      public_id: storageKey,
+      folder: CLOUDINARY_FOLDER,
+      overwrite: false,
+    }
+  );
+
+  console.log(
+    `[Upload Pipeline] Ciphertext successfully uploaded to Cloudinary storage key "${storageKey}"`
+  );
+} catch (cloudinaryErr: any) {
+  console.error(
+    `[Upload Pipeline ERROR] Cloudinary upload failed for key "${storageKey}":`,
+    cloudinaryErr.message
+  );
+
+  throw {
+    statusCode: 500,
+    message: `Storage failure: ${cloudinaryErr.message}`,
+  };
+}
 
   // Store metadata & encrypted DEK in PostgreSQL
   const fileRecord = await prisma.file.create({
@@ -228,14 +239,30 @@ export async function downloadFile(
   }
 
   // Retrieve ciphertext from MinIO
-  let ciphertextStream: Readable;
-  try {
-    ciphertextStream = await minioClient.getObject(BUCKET_NAME, file.storageKey);
-  } catch (err: any) {
-    throw { statusCode: 500, message: 'Failed to retrieve file ciphertext from object storage.' };
+  let ciphertextBuffer: Buffer;
+
+try {
+  const resource = await cloudinary.api.resource(
+    `${CLOUDINARY_FOLDER}/${file.storageKey}`,
+    {
+      resource_type: 'raw',
+      type: 'authenticated',
+    }
+  );
+
+  const response = await fetch(resource.secure_url);
+
+  if (!response.ok) {
+    throw new Error(`Cloudinary returned HTTP ${response.status}`);
   }
 
-  const ciphertextBuffer = await streamToBuffer(ciphertextStream);
+  ciphertextBuffer = Buffer.from(await response.arrayBuffer());
+} catch (err: any) {
+  throw {
+    statusCode: 500,
+    message: 'Failed to retrieve file ciphertext from object storage.',
+  };
+}
 
   // Attempt decryption & integrity check
   let decryptedBuffer: Buffer;
@@ -390,10 +417,20 @@ export async function deleteFile(fileId: string, userId: string, ipAddress: stri
 
   // 1. Delete object from MinIO
   try {
-    await minioClient.removeObject(BUCKET_NAME, file.storageKey);
-  } catch (err: any) {
-    console.warn(`MinIO delete warning for key ${file.storageKey}:`, err.message);
-  }
+  await cloudinary.uploader.destroy(
+    `${CLOUDINARY_FOLDER}/${file.storageKey}`,
+    {
+      resource_type: 'raw',
+      type: 'authenticated',
+      invalidate: true,
+    }
+  );
+} catch (err: any) {
+  console.warn(
+    `Cloudinary delete warning for key ${file.storageKey}:`,
+    err.message
+  );
+}
 
   // 2. Delete database record
   await prisma.file.delete({
@@ -434,15 +471,30 @@ export async function verifyFileIntegrity(
   }
 
   // Fetch ciphertext from MinIO
-  let ciphertextStream: Readable;
-  try {
-    ciphertextStream = await minioClient.getObject(BUCKET_NAME, file.storageKey);
-  } catch (err: any) {
-    throw { statusCode: 500, message: 'Failed to retrieve file ciphertext from storage.' };
+  let ciphertextBuffer: Buffer;
+
+try {
+  const resource = await cloudinary.api.resource(
+    `${CLOUDINARY_FOLDER}/${file.storageKey}`,
+    {
+      resource_type: 'raw',
+      type: 'authenticated',
+    }
+  );
+
+  const response = await fetch(resource.secure_url);
+
+  if (!response.ok) {
+    throw new Error(`Cloudinary returned HTTP ${response.status}`);
   }
 
-  const ciphertextBuffer = await streamToBuffer(ciphertextStream);
-
+  ciphertextBuffer = Buffer.from(await response.arrayBuffer());
+} catch (err: any) {
+  throw {
+    statusCode: 500,
+    message: 'Failed to retrieve file ciphertext from storage.',
+  };
+}
   try {
     decryptEnvelope({
       ciphertext: ciphertextBuffer,
