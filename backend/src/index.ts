@@ -19,7 +19,6 @@ import { securityCenterRouter } from './routes/securityCenter';
 import { adminRouter } from './routes/admin';
 import { supportRouter } from './routes/support';
 import { userRouter } from './routes/users';
-import { initializeMinioBucket } from './config/minio';
 
 // Validate environment variables on startup
 validateEnv();
@@ -90,10 +89,6 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 // Start server
 async function startServer() {
   try {
-    initializeMinioBucket().catch((err) => {
-      console.warn('MinIO auto-bucket initialization warning:', err.message);
-    });
-
     app.listen(port, () => {
       console.log(`[FileVault API] Server running on port ${port} (${process.env.NODE_ENV || 'development'})`);
     });

@@ -1,21 +1,18 @@
 import { Router, Request, Response } from 'express';
 import { checkDatabaseHealth } from '../config/db';
 import { checkRedisHealth } from '../config/redis';
-import { checkMinioHealth } from '../config/minio';
 
 export const healthRouter = Router();
 
 healthRouter.get('/', async (_req: Request, res: Response) => {
-  const [dbHealth, redisHealth, minioHealth] = await Promise.all([
+  const [dbHealth, redisHealth] = await Promise.all([
     checkDatabaseHealth(),
     checkRedisHealth(),
-    checkMinioHealth(),
   ]);
 
   const allHealthy =
     dbHealth.status === 'healthy' &&
-    redisHealth.status === 'healthy' &&
-    minioHealth.status === 'healthy';
+    redisHealth.status === 'healthy';
 
   const healthSummary = {
     status: allHealthy ? 'healthy' : 'unhealthy',
@@ -23,7 +20,6 @@ healthRouter.get('/', async (_req: Request, res: Response) => {
     services: {
       database: dbHealth,
       redis: redisHealth,
-      minio: minioHealth,
     },
   };
 
