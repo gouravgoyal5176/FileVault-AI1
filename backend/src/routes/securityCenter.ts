@@ -4,8 +4,10 @@ import { Role } from '@prisma/client';
 import {
   calculateSecurityScore,
   saveScoreSnapshot,
+  getScoreSnapshots,
   getAuditLogs,
   getAdminSecurityOverview,
+  getFailedLoginsTelemetry,
 } from '../services/securityCenterService';
 
 export const securityCenterRouter = Router();
@@ -25,6 +27,36 @@ securityCenterRouter.get('/score', async (req: AuthRequest, res: Response) => {
   } catch (error: any) {
     const statusCode = error.statusCode || 500;
     return res.status(statusCode).json({ error: error.message || 'Failed to calculate security score' });
+  }
+});
+
+// GET /api/security-center/failed-logins (Real failed logins telemetry)
+securityCenterRouter.get('/failed-logins', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const telemetry = await getFailedLoginsTelemetry(req.user.id);
+    return res.status(200).json(telemetry);
+  } catch (error: any) {
+    const statusCode = error.statusCode || 500;
+    return res.status(statusCode).json({ error: error.message || 'Failed to retrieve failed login telemetry' });
+  }
+});
+
+// GET /api/security-center/snapshots (List recent score snapshots for risk history)
+securityCenterRouter.get('/snapshots', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const snapshots = await getScoreSnapshots(req.user.id);
+    return res.status(200).json({ snapshots });
+  } catch (error: any) {
+    const statusCode = error.statusCode || 500;
+    return res.status(statusCode).json({ error: error.message || 'Failed to retrieve score snapshots' });
   }
 });
 

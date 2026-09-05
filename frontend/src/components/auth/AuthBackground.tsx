@@ -2,7 +2,7 @@ import { motion } from 'framer-motion';
 
 export function AuthBackground() {
   return (
-    <div className="fixed inset-0 pointer-events-none overflow-hidden select-none z-0 bg-[#05070E]">
+    <div className="fixed inset-0 pointer-events-none overflow-hidden select-none z-0 bg-[#05070E] dark:bg-[#05070E] light:bg-slate-100">
       {/* Subtle Tech Grid Pattern */}
       <div 
         className="absolute inset-0 opacity-[0.03]" 

@@ -29,6 +29,14 @@ enum RiskLevel {
   CRITICAL
 }
 
+enum FileSensitivity {
+  PUBLIC
+  INTERNAL
+  CONFIDENTIAL
+  RESTRICTED
+  CRITICAL
+}
+
 enum AuthProvider {
   LOCAL
   GOOGLE
@@ -58,13 +66,14 @@ model User {
   updatedAt           DateTime     @updatedAt
 
   refreshTokens          RefreshToken[]
-  ownedFiles             File[]                  @relation("FileOwner")
-  sharesGiven            FileShare[]             @relation("SharesGiven")
-  sharesReceived         FileShare[]             @relation("SharesReceived")
+  ownedFiles             File[]                     @relation("FileOwner")
+  sharesGiven            FileShare[]                @relation("SharesGiven")
+  sharesReceived         FileShare[]                @relation("SharesReceived")
   activityLogs           ActivityLog[]
   securityAlerts         SecurityAlert[]
   securityScoreSnapshots SecurityScoreSnapshot[]
   supportTickets         SupportTicket[]
+  adaptiveDecisions      AdaptiveSecurityDecision[]
 }
 
 enum TicketCategory {
@@ -100,7 +109,6 @@ model SupportTicket {
   @@index([createdAt])
 }
 
-
 model RefreshToken {
   id        String   @id @default(uuid())
   tokenHash String   @unique
@@ -130,10 +138,12 @@ model File {
   dekAuthTag       String
   integrityStatus  IntegrityStatus @default(OK)
   isHoneyfile      Boolean         @default(false)
+  sensitivity      FileSensitivity @default(INTERNAL)
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 
-  shares FileShare[]
+  shares            FileShare[]
+  adaptiveDecisions AdaptiveSecurityDecision[]
 
   @@index([ownerId])
   @@index([storageKey])
@@ -198,4 +208,27 @@ model SecurityScoreSnapshot {
 
   @@index([userId])
   @@index([calculatedAt])
+}
+
+model AdaptiveSecurityDecision {
+  id              String          @id @default(uuid())
+  userId          String
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fileId          String?
+  file            File?           @relation(fields: [fileId], references: [id], onDelete: SetNull)
+  requestedAccess SharePermission
+  decision        String          // ALLOW, VIEW_ONLY, MFA_REQUIRED, BLOCK
+  riskScore       Int             // 0-100
+  riskLevel       RiskLevel       // LOW, MEDIUM, HIGH, CRITICAL
+  fileSensitivity FileSensitivity
+  reasons         Json            // e.g. ["UNRECOGNIZED_DEVICE", "CONFIDENTIAL_FILE"]
+  ipAddress       String
+  userAgent       String
+  timestamp       DateTime        @default(now())
+
+  @@index([userId])
+  @@index([fileId])
+  @@index([timestamp])
+  @@index([riskLevel])
+  @@index([decision])
 }

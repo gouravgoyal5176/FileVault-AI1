@@ -21,7 +21,7 @@ export function AdminLayout({
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   return (
-    <div className="flex min-h-screen bg-[#05070E] font-sans text-slate-100 antialiased selection:bg-indigo-500 selection:text-white">
+    <div className="flex min-h-screen bg-[#05070E] dark:bg-[#05070E] light:bg-slate-50 font-sans text-slate-100 dark:text-slate-100 light:text-slate-900 antialiased selection:bg-indigo-500 selection:text-white">
       {/* Desktop Admin Sidebar */}
       <div className="hidden md:block">
         <AdminSidebar activeSection={activeSection} setActiveSection={setActiveSection} />
@@ -30,7 +30,7 @@ export function AdminLayout({
       {/* Mobile Drawer */}
       {mobileSidebarOpen && (
         <div className="fixed inset-0 z-50 md:hidden bg-black/70 backdrop-blur-xs flex">
-          <div className="w-64 bg-[#0B0F1A] h-full shadow-2xl">
+          <div className="w-64 bg-[#0B0F1A] dark:bg-[#0B0F1A] light:bg-white h-full shadow-2xl">
             <AdminSidebar
               activeSection={activeSection}
               setActiveSection={(section) => {
@@ -45,14 +45,14 @@ export function AdminLayout({
 
       {/* Main Admin Console Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        <div className="md:hidden p-3 bg-[#0B0F1A] border-b border-slate-800 flex items-center justify-between">
+        <div className="md:hidden p-3 bg-[#0B0F1A] dark:bg-[#0B0F1A] light:bg-white border-b border-slate-800 dark:border-slate-800 light:border-slate-200 flex items-center justify-between">
           <button
             onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
-            className="p-2 text-slate-300 hover:text-white rounded-lg hover:bg-slate-800"
+            className="p-2 text-slate-300 dark:text-slate-300 light:text-slate-700 hover:text-white dark:hover:text-white light:hover:text-slate-900 rounded-lg hover:bg-slate-800 dark:hover:bg-slate-800 light:hover:bg-slate-100"
           >
             <Menu className="w-5 h-5" />
           </button>
-          <span className="font-extrabold text-sm text-white tracking-wide">FileVault ADMIN</span>
+          <span className="font-extrabold text-sm text-white dark:text-white light:text-slate-900 tracking-wide">FileVault ADMIN</span>
         </div>
 
         <AdminNavbar searchQuery={adminSearchQuery} setSearchQuery={setAdminSearchQuery} />
@@ -61,10 +61,11 @@ export function AdminLayout({
           {children}
         </main>
 
-        <footer className="border-t border-slate-800/80 bg-[#070A12] px-6 py-4 text-center text-xs text-slate-500 font-mono select-none">
+        <footer className="border-t border-slate-800/80 dark:border-slate-800/80 light:border-slate-200 bg-[#070A12] dark:bg-[#070A12] light:bg-slate-100 px-6 py-4 text-center text-xs text-slate-500 dark:text-slate-500 light:text-slate-600 font-mono select-none">
           FileVault AI — Admin Security Console v2.0
         </footer>
       </div>
     </div>
   );
 }
+

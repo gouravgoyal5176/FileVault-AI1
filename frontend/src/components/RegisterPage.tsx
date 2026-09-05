@@ -1,7 +1,8 @@
 import { useState, FormEvent } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
-import { Lock, Mail, ShieldCheck, ShieldAlert, ArrowRight, Eye, EyeOff, Check, X } from 'lucide-react';
+import { useTheme } from '../context/ThemeContext';
+import { Lock, Mail, ShieldCheck, ShieldAlert, ArrowRight, ArrowLeft, Eye, EyeOff, Check, X, Sun, Moon } from 'lucide-react';
 import { GoogleAuthButton } from './GoogleAuthButton';
 import { OtpModal } from './OtpModal';
 import { apiRequest } from '../api/apiClient';
@@ -10,10 +11,12 @@ import { SecurityVisual } from './auth/SecurityVisual';
 
 interface RegisterPageProps {
   onSwitchToLogin: () => void;
+  onBackToHome?: () => void;
 }
 
-export function RegisterPage({ onSwitchToLogin }: RegisterPageProps) {
+export function RegisterPage({ onSwitchToLogin, onBackToHome }: RegisterPageProps) {
   const { register, loginWithGoogle } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -93,7 +96,7 @@ export function RegisterPage({ onSwitchToLogin }: RegisterPageProps) {
   };
 
   return (
-    <div className="min-h-screen bg-[#05070E] flex items-center justify-center p-4 sm:p-6 lg:p-10 font-sans relative overflow-hidden select-none">
+    <div className="min-h-screen bg-[#05070E] dark:bg-[#05070E] light:bg-slate-100 flex items-center justify-center p-4 sm:p-6 lg:p-10 font-sans relative overflow-hidden select-none">
       {/* Cybersecurity Ambient Canvas Background */}
       <AuthBackground />
 
@@ -111,22 +114,42 @@ export function RegisterPage({ onSwitchToLogin }: RegisterPageProps) {
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={{ duration: 0.5, ease: 'easeOut' }}
         >
-          <div className="bg-[#0B0F1A]/85 backdrop-blur-2xl border border-indigo-500/20 rounded-3xl p-6 sm:p-8 lg:p-10 shadow-2xl shadow-indigo-950/80 space-y-6 relative overflow-hidden">
+          <div className="bg-[#0B0F1A]/85 dark:bg-[#0B0F1A]/85 light:bg-white border border-indigo-500/20 dark:border-indigo-500/20 light:border-slate-200 rounded-3xl p-6 sm:p-8 lg:p-10 shadow-2xl dark:shadow-indigo-950/80 light:shadow-md space-y-6 relative overflow-hidden">
             {/* Subtle Top Card Gradient Highlight */}
             <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-400 via-cyan-400 to-indigo-500 opacity-80" />
 
             {/* Card Header */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <div className="inline-flex p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-2xl shadow-xs">
-                  <ShieldCheck className="w-6 h-6 stroke-[2.2]" />
+                <div className="flex items-center gap-3">
+                  <div className="inline-flex p-3 bg-emerald-500/10 dark:bg-emerald-500/10 light:bg-emerald-50 border border-emerald-500/20 dark:border-emerald-500/20 light:border-emerald-200 text-emerald-400 dark:text-emerald-400 light:text-emerald-600 rounded-2xl shadow-xs">
+                    <ShieldCheck className="w-6 h-6 stroke-[2.2]" />
+                  </div>
+                  {onBackToHome && (
+                    <button
+                      type="button"
+                      onClick={onBackToHome}
+                      className="text-xs text-slate-400 dark:text-slate-400 light:text-slate-600 hover:text-emerald-400 dark:hover:text-emerald-400 light:hover:text-emerald-600 font-medium flex items-center gap-1 transition cursor-pointer"
+                    >
+                      <ArrowLeft className="w-3.5 h-3.5" /> Back to Home
+                    </button>
+                  )}
                 </div>
-                <span className="text-[10px] font-mono font-bold tracking-widest text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 px-2.5 py-1 rounded-full uppercase">
-                  ZERO-TRUST VAULT
-                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={toggleTheme}
+                    className="p-2 text-slate-400 dark:text-slate-400 light:text-slate-600 hover:text-slate-100 dark:hover:text-slate-100 light:hover:text-slate-900 rounded-xl hover:bg-slate-800/80 dark:hover:bg-slate-800/80 light:hover:bg-slate-100 transition cursor-pointer"
+                    title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
+                  >
+                    {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-indigo-600" />}
+                  </button>
+                  <span className="text-[10px] font-mono font-bold tracking-widest text-cyan-400 dark:text-cyan-400 light:text-cyan-700 bg-cyan-500/10 dark:bg-cyan-500/10 light:bg-cyan-50 border border-cyan-500/20 dark:border-cyan-500/20 light:border-cyan-200 px-2.5 py-1 rounded-full uppercase">
+                    ZERO-TRUST VAULT
+                  </span>
+                </div>
               </div>
-              <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Create Secure Vault</h2>
-              <p className="text-xs sm:text-sm text-slate-400 font-normal">
+              <h2 className="text-2xl sm:text-3xl font-extrabold text-white dark:text-white light:text-slate-900 tracking-tight">Create Secure Vault</h2>
+              <p className="text-xs sm:text-sm text-slate-400 dark:text-slate-400 light:text-slate-600 font-normal">
                 Zero-Trust Client-Isolated User Registration &amp; Encryption Setup.
               </p>
             </div>
@@ -160,9 +183,9 @@ export function RegisterPage({ onSwitchToLogin }: RegisterPageProps) {
             {/* Registration Form */}
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300 tracking-wide block">Email Address</label>
+                <label className="text-xs font-semibold text-slate-300 dark:text-slate-300 light:text-slate-700 tracking-wide block">Email Address</label>
                 <div className="relative">
-                  <Mail className="w-4 h-4 text-slate-500 absolute left-3.5 top-3.5" />
+                  <Mail className="w-4 h-4 text-slate-500 dark:text-slate-500 light:text-slate-400 absolute left-3.5 top-3.5" />
                   <input
                     type="email"
                     required
@@ -170,15 +193,15 @@ export function RegisterPage({ onSwitchToLogin }: RegisterPageProps) {
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="name@example.com"
                     autoComplete="email"
-                    className="w-full pl-10 pr-4 py-3 bg-[#070A12]/90 border border-slate-800 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-xl text-xs sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none transition-all duration-200"
+                    className="w-full pl-10 pr-4 py-3 bg-[#070A12]/90 dark:bg-[#070A12]/90 light:bg-white border border-slate-800 dark:border-slate-800 light:border-slate-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-xl text-xs sm:text-sm text-slate-100 dark:text-slate-100 light:text-slate-900 placeholder-slate-500 dark:placeholder-slate-500 light:placeholder-slate-400 focus:outline-none transition-all duration-200"
                   />
                 </div>
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300 tracking-wide block">Master Password</label>
+                <label className="text-xs font-semibold text-slate-300 dark:text-slate-300 light:text-slate-700 tracking-wide block">Master Password</label>
                 <div className="relative">
-                  <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-3.5" />
+                  <Lock className="w-4 h-4 text-slate-500 dark:text-slate-500 light:text-slate-400 absolute left-3.5 top-3.5" />
                   <input
                     type={showPassword ? 'text' : 'password'}
                     required
@@ -186,7 +209,7 @@ export function RegisterPage({ onSwitchToLogin }: RegisterPageProps) {
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••••••"
                     autoComplete="new-password"
-                    className="w-full pl-10 pr-11 py-3 bg-[#070A12]/90 border border-slate-800 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-xl text-xs sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none transition-all duration-200"
+                    className="w-full pl-10 pr-11 py-3 bg-[#070A12]/90 dark:bg-[#070A12]/90 light:bg-white border border-slate-800 dark:border-slate-800 light:border-slate-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-xl text-xs sm:text-sm text-slate-100 dark:text-slate-100 light:text-slate-900 placeholder-slate-500 dark:placeholder-slate-500 light:placeholder-slate-400 focus:outline-none transition-all duration-200"
                   />
                   <button
                     type="button"
@@ -202,22 +225,22 @@ export function RegisterPage({ onSwitchToLogin }: RegisterPageProps) {
               {/* Password Strength Validator Indicator */}
               {password.length > 0 && (
                 <motion.div 
-                  className="p-3.5 rounded-2xl bg-[#070A12]/90 border border-slate-800 space-y-2 text-xs"
+                  className="p-3.5 rounded-2xl bg-[#070A12]/90 dark:bg-[#070A12]/90 light:bg-slate-50 border border-slate-800 dark:border-slate-800 light:border-slate-200 space-y-2 text-xs"
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   transition={{ duration: 0.3 }}
                 >
-                  <span className="font-mono font-bold text-slate-400 tracking-wider uppercase text-[10px] block">
+                  <span className="font-mono font-bold text-slate-400 dark:text-slate-400 light:text-slate-600 tracking-wider uppercase text-[10px] block">
                     Security Standards Check
                   </span>
                   {rules.map((rule, idx) => (
                     <div key={idx} className="flex items-center gap-2">
                       {rule.valid ? (
-                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <Check className="w-3.5 h-3.5 text-emerald-400 light:text-emerald-600 shrink-0" />
                       ) : (
-                        <X className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                        <X className="w-3.5 h-3.5 text-slate-600 light:text-slate-400 shrink-0" />
                       )}
-                      <span className={rule.valid ? 'text-emerald-300 font-semibold' : 'text-slate-500'}>
+                      <span className={rule.valid ? 'text-emerald-300 dark:text-emerald-300 light:text-emerald-700 font-semibold' : 'text-slate-500 dark:text-slate-500 light:text-slate-400'}>
                         {rule.label}
                       </span>
                     </div>
@@ -226,9 +249,9 @@ export function RegisterPage({ onSwitchToLogin }: RegisterPageProps) {
               )}
 
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300 tracking-wide block">Confirm Master Password</label>
+                <label className="text-xs font-semibold text-slate-300 dark:text-slate-300 light:text-slate-700 tracking-wide block">Confirm Master Password</label>
                 <div className="relative">
-                  <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-3.5" />
+                  <Lock className="w-4 h-4 text-slate-500 dark:text-slate-500 light:text-slate-400 absolute left-3.5 top-3.5" />
                   <input
                     type={showConfirmPassword ? 'text' : 'password'}
                     required
@@ -236,7 +259,7 @@ export function RegisterPage({ onSwitchToLogin }: RegisterPageProps) {
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="••••••••••••"
                     autoComplete="new-password"
-                    className="w-full pl-10 pr-11 py-3 bg-[#070A12]/90 border border-slate-800 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-xl text-xs sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none transition-all duration-200"
+                    className="w-full pl-10 pr-11 py-3 bg-[#070A12]/90 dark:bg-[#070A12]/90 light:bg-white border border-slate-800 dark:border-slate-800 light:border-slate-300 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-xl text-xs sm:text-sm text-slate-100 dark:text-slate-100 light:text-slate-900 placeholder-slate-500 dark:placeholder-slate-500 light:placeholder-slate-400 focus:outline-none transition-all duration-200"
                   />
                   <button
                     type="button"
@@ -248,7 +271,7 @@ export function RegisterPage({ onSwitchToLogin }: RegisterPageProps) {
                   </button>
                 </div>
                 {confirmPassword.length > 0 && !passwordsMatch && (
-                  <p className="text-xs text-rose-400 font-semibold pt-0.5">Master passwords do not match</p>
+                  <p className="text-xs text-rose-400 dark:text-rose-400 light:text-rose-600 font-semibold pt-0.5">Master passwords do not match</p>
                 )}
               </div>
 
@@ -277,10 +300,10 @@ export function RegisterPage({ onSwitchToLogin }: RegisterPageProps) {
             {/* Social Auth Divider */}
             <div className="relative my-6">
               <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-slate-800"></div>
+                <div className="w-full border-t border-slate-800 dark:border-slate-800 light:border-slate-200"></div>
               </div>
-              <div className="relative flex justify-center text-[10px] uppercase font-bold tracking-widest text-slate-500">
-                <span className="bg-[#0B0F1A] px-3">Or register with</span>
+              <div className="relative flex justify-center text-[10px] uppercase font-bold tracking-widest text-slate-500 dark:text-slate-500 light:text-slate-400">
+                <span className="bg-[#0B0F1A] dark:bg-[#0B0F1A] light:bg-white px-3">Or register with</span>
               </div>
             </div>
 
@@ -292,12 +315,12 @@ export function RegisterPage({ onSwitchToLogin }: RegisterPageProps) {
             />
 
             {/* Card Footer */}
-            <div className="pt-4 border-t border-slate-800/80 text-center">
-              <p className="text-xs text-slate-400">
+            <div className="pt-4 border-t border-slate-800/80 dark:border-slate-800/80 light:border-slate-200 text-center">
+              <p className="text-xs text-slate-400 dark:text-slate-400 light:text-slate-600">
                 Already have a secure vault account?{' '}
                 <button
                   onClick={onSwitchToLogin}
-                  className="text-emerald-400 hover:text-emerald-300 hover:underline font-bold cursor-pointer transition ml-1"
+                  className="text-emerald-400 dark:text-emerald-400 light:text-emerald-600 hover:text-emerald-300 font-bold cursor-pointer transition ml-1"
                 >
                   Sign In
                 </button>

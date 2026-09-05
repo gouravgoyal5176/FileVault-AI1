@@ -38,7 +38,8 @@ export async function calculateBehavioralAnomaly(
   userId: string,
   targetEvaluatedAt?: Date,
   currentIp?: string,
-  currentUserAgent?: string
+  currentUserAgent?: string,
+  persistAlert: boolean = false
 ): Promise<AnomalyEvaluationResult> {
   const evaluatedAt = targetEvaluatedAt ? new Date(targetEvaluatedAt) : new Date();
 
@@ -179,7 +180,7 @@ export async function calculateBehavioralAnomaly(
   let alertGenerated = false;
   let alertSuppressed = false;
 
-  if (anomalyScore >= 0.50) {
+  if (persistAlert && anomalyScore >= 0.50) {
     const fifteenMinutesAgo = new Date(evaluatedAt.getTime() - 15 * 60 * 1000);
 
     // Safe Deduplication Check: Prevent duplicate alerts if a BEHAVIORAL_ANOMALY or BRUTE_FORCE_LOCKOUT alert exists in the last 15 min

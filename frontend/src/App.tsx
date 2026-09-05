@@ -24,12 +24,13 @@ import { SettingsPage } from './components/pages/SettingsPage';
 import { FileUploadModal } from './components/FileUploadModal';
 import { FileDetailsModal } from './components/FileDetailsModal';
 import { ShareFileModal } from './components/ShareFileModal';
+import { FileVaultLanding } from './components/home/FileVaultLanding';
 import { apiRequest } from './api/apiClient';
 import { RefreshCw, ShieldCheck } from 'lucide-react';
 
 function MainAppContent() {
   const { user, loading: authLoading } = useAuth();
-  const [mode, setMode] = useState<'login' | 'register' | 'admin-login'>('login');
+  const [mode, setMode] = useState<'home' | 'login' | 'register' | 'admin-login'>('home');
 
   // User State
   const [userActiveTab, setUserActiveTab] = useState<UserNavTab>('dashboard');
@@ -157,16 +158,40 @@ function MainAppContent() {
 
   // Logged-Out Unauthenticated Auth Flow
   if (!user) {
-    if (mode === 'admin-login') {
-      return <AdminLoginPage onSwitchToUserLogin={() => setMode('login')} />;
+    if (mode === 'home') {
+      return (
+        <FileVaultLanding
+          onLoginClick={() => setMode('login')}
+          onRegisterClick={() => setMode('register')}
+          onAdminClick={() => setMode('admin-login')}
+        />
+      );
     }
-    return mode === 'login' ? (
+
+    if (mode === 'admin-login') {
+      return (
+        <AdminLoginPage
+          onSwitchToUserLogin={() => setMode('login')}
+          onBackToHome={() => setMode('home')}
+        />
+      );
+    }
+
+    if (mode === 'register') {
+      return (
+        <RegisterPage
+          onSwitchToLogin={() => setMode('login')}
+          onBackToHome={() => setMode('home')}
+        />
+      );
+    }
+
+    return (
       <LoginPage
         onSwitchToRegister={() => setMode('register')}
         onSwitchToAdminLogin={() => setMode('admin-login')}
+        onBackToHome={() => setMode('home')}
       />
-    ) : (
-      <RegisterPage onSwitchToLogin={() => setMode('login')} />
     );
   }
 

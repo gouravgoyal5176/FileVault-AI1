@@ -9,7 +9,7 @@ export interface ScoreBreakdown {
   sharingHygieneScore: number; // 0 - 15
   deceptionScore: number;      // 0 - 15
   finalScore: number;          // 0 - 100
-  rating: 'EXCELLENT' | 'GOOD' | 'MODERATE' | 'CRITICAL_RISK';
+  rating: 'EXCELLENT' | 'GOOD' | 'MODERATE' | 'HIGH_RISK' | 'CRITICAL';
   metrics: {
     totalFiles: number;
     tamperedFiles: number;
@@ -21,6 +21,7 @@ export interface ScoreBreakdown {
     expiredSharesCount: number;
     indefiniteSharesCount: number;
     honeyfilesCount: number;
+    honeyfileBreached: boolean;
   };
 }
 
@@ -107,20 +108,29 @@ export async function calculateSecurityScore(userId: string, targetEvaluatedAt?:
   const sharingHygieneScore = Math.max(0, Math.min(15, 15 - (expiredSharesCount * 5 + indefiniteDeduction)));
 
   // 5. Deception / Honeyfile Protection Vector (Max 15 pts)
+  const honeyfileAlert = await prisma.securityAlert.findFirst({
+    where: {
+      userId,
+      alertType: { in: ['HONEYFILE_ACCESSED', 'HONEYFILE_TRAP_TRIGGERED'] },
+      resolved: false,
+    },
+  });
   const honeyfilesCount = await prisma.file.count({
     where: { ownerId: userId, isHoneyfile: true, createdAt: { lte: evaluatedAt } },
   });
-  const deceptionScore = honeyfilesCount > 0 ? 15 : 0;
+  const honeyfileBreached = !!honeyfileAlert;
+  const deceptionScore = honeyfileBreached ? 0 : 15;
 
   // Final Clamped Score Calculation
   const total = vaultIntegrityScore + sessionHygieneScore + activeThreatScore + sharingHygieneScore + deceptionScore;
   const finalScore = Math.max(0, Math.min(100, Math.round(total)));
 
-  let rating: 'EXCELLENT' | 'GOOD' | 'MODERATE' | 'CRITICAL_RISK';
+  let rating: 'EXCELLENT' | 'GOOD' | 'MODERATE' | 'HIGH_RISK' | 'CRITICAL';
   if (finalScore >= 85) rating = 'EXCELLENT';
   else if (finalScore >= 70) rating = 'GOOD';
   else if (finalScore >= 50) rating = 'MODERATE';
-  else rating = 'CRITICAL_RISK';
+  else if (finalScore >= 30) rating = 'HIGH_RISK';
+  else rating = 'CRITICAL';
 
   return {
     evaluatedAt: evaluatedAt.toISOString(),
@@ -142,6 +152,7 @@ export async function calculateSecurityScore(userId: string, targetEvaluatedAt?:
       expiredSharesCount,
       indefiniteSharesCount,
       honeyfilesCount,
+      honeyfileBreached,
     },
   };
 }
@@ -249,5 +260,37 @@ export async function getAdminSecurityOverview() {
     honeyfilesCount,
     suspiciousEventsCount,
     systemIntegrityStatus: tamperedFilesCount === 0 && criticalAlerts === 0 ? 'HEALTHY' : 'ELEVATED_RISK',
+  };
+}
+
+export async function getScoreSnapshots(userId: string) {
+  return prisma.securityScoreSnapshot.findMany({
+    where: { userId },
+    orderBy: { calculatedAt: 'asc' },
+    take: 10,
+  });
+}
+
+export async function getFailedLoginsTelemetry(userId: string) {
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const failedLogs = await prisma.activityLog.findMany({
+    where: {
+      userId,
+      actionType: 'LOGIN_FAILED',
+      timestamp: { gte: sevenDaysAgo },
+    },
+    orderBy: { timestamp: 'desc' },
+    take: 10,
+  });
+
+  const count = failedLogs.length;
+  const lastFailedLog = failedLogs[0] || null;
+
+  return {
+    count,
+    lastFailedAt: lastFailedLog?.timestamp ? lastFailedLog.timestamp.toISOString() : null,
+    ipAddress: lastFailedLog?.ipAddress || null,
+    userAgent: lastFailedLog?.userAgent || null,
+    failedLogs,
   };
 }

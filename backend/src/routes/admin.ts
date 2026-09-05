@@ -12,6 +12,7 @@ import {
   deleteUserAccount,
   getAdminAuditLogs,
   getAdminSecurityAlerts,
+  getAdminAdaptiveDecisions,
 } from '../services/adminService';
 
 export const adminRouter = Router();
@@ -152,3 +153,12 @@ adminRouter.get('/security-alerts', async (req: AuthRequest, res: Response) => {
   }
 });
 
+// GET /api/admin/adaptive-decisions (List recent adaptive zero-trust security decisions)
+adminRouter.get('/adaptive-decisions', async (req: AuthRequest, res: Response) => {
+  try {
+    const result = await getAdminAdaptiveDecisions();
+    return res.status(200).json(result);
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Failed to fetch adaptive security decisions' });
+  }
+});

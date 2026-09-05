@@ -16,6 +16,7 @@ export function FileUploadModal({ isOpen, onClose, onUploadSuccess }: FileUpload
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<boolean>(false);
   const [stepText, setStepText] = useState<string>('');
+  const [uploadedFile, setUploadedFile] = useState<any>(null);
 
   if (!isOpen) return null;
 
@@ -35,6 +36,7 @@ export function FileUploadModal({ isOpen, onClose, onUploadSuccess }: FileUpload
 
     setLoading(true);
     setError(null);
+    setUploadedFile(null);
     setStepText('Scanning binary payload...');
 
     // Multi-step UI animation feedback sequence
@@ -67,6 +69,7 @@ export function FileUploadModal({ isOpen, onClose, onUploadSuccess }: FileUpload
         throw new Error(data.error || data.message || `File upload failed with status ${response.status}`);
       }
 
+      setUploadedFile(data.file);
       setStepText('Verifying SHA-256 Checksum & GCM Auth Tag...');
       setTimeout(() => {
         setSuccess(true);
@@ -74,9 +77,10 @@ export function FileUploadModal({ isOpen, onClose, onUploadSuccess }: FileUpload
           setSuccess(false);
           setFile(null);
           setIsHoneyfile(false);
+          setUploadedFile(null);
           onUploadSuccess();
           onClose();
-        }, 1200);
+        }, 2200);
       }, 500);
     } catch (err: any) {
       setError(err.message || 'Failed to encrypt and upload file');
@@ -122,16 +126,42 @@ export function FileUploadModal({ isOpen, onClose, onUploadSuccess }: FileUpload
         )}
 
         {success ? (
-          <div className="py-10 text-center space-y-3">
+          <div className="py-8 text-center space-y-4">
             <CheckCircle2 className="w-14 h-14 text-emerald-400 mx-auto animate-bounce" />
-            <p className="font-extrabold text-emerald-300 dark:text-emerald-300 light:text-emerald-700 text-base tracking-wide">File Encrypted &amp; Vaulted Securely</p>
-            <div className="flex justify-center items-center gap-2 text-xs text-slate-400 dark:text-slate-400 light:text-slate-600 font-mono">
-              <span className="text-emerald-400 font-bold">Encrypted ✓</span>
-              <span>•</span>
-              <span className="text-emerald-400 font-bold">Uploaded ✓</span>
-              <span>•</span>
-              <span className="text-emerald-400 font-bold">Secured ✓</span>
+            <div>
+              <p className="font-extrabold text-emerald-300 dark:text-emerald-300 light:text-emerald-700 text-base tracking-wide">File Encrypted &amp; Vaulted Securely</p>
+              <div className="flex justify-center items-center gap-2 text-xs text-slate-400 dark:text-slate-400 light:text-slate-600 font-mono mt-1">
+                <span className="text-emerald-400 font-bold">Encrypted ✓</span>
+                <span>•</span>
+                <span className="text-emerald-400 font-bold">Uploaded ✓</span>
+                <span>•</span>
+                <span className="text-emerald-400 font-bold">Secured ✓</span>
+              </div>
             </div>
+
+            {uploadedFile?.sensitivity && (
+              <div className="p-3.5 bg-indigo-500/10 dark:bg-indigo-500/10 light:bg-slate-100 rounded-2xl border border-indigo-500/20 text-xs space-y-1">
+                <div className="text-slate-200 dark:text-slate-200 light:text-slate-800 flex items-center justify-center gap-2 font-bold">
+                  <span>Detected Sensitivity:</span>
+                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] uppercase font-extrabold border ${
+                    uploadedFile.sensitivity === 'CRITICAL'
+                      ? 'bg-rose-500/20 text-rose-300 dark:text-rose-300 light:text-rose-800 border-rose-500/40'
+                      : uploadedFile.sensitivity === 'RESTRICTED'
+                      ? 'bg-orange-500/20 text-orange-300 dark:text-orange-300 light:text-orange-800 border-orange-500/40'
+                      : uploadedFile.sensitivity === 'CONFIDENTIAL'
+                      ? 'bg-purple-500/20 text-purple-300 dark:text-purple-300 light:text-purple-800 border-purple-500/40'
+                      : 'bg-indigo-500/20 text-indigo-300 dark:text-indigo-300 light:text-indigo-800 border-indigo-500/40'
+                  }`}>
+                    {uploadedFile.sensitivity}
+                  </span>
+                </div>
+                {uploadedFile.sensitivity === 'CRITICAL' && (
+                  <p className="text-[11px] text-rose-400 dark:text-rose-400 light:text-rose-700 font-extrabold pt-0.5">
+                    Recipient Access: BLOCKED by Adaptive Security Policy
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-5">

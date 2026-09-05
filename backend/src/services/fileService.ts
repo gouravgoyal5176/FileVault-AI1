@@ -1,17 +1,20 @@
 import { prisma } from '../config/db';
-import cloudinary, { CLOUDINARY_FOLDER } from '../config/cloudinary';
+import { minioClient, BUCKET_NAME } from '../config/minio';
 import {
   encryptEnvelope,
   decryptEnvelope,
   GcmAuthTagError,
   HashMismatchError,
 } from '../utils/vaultCrypto';
-import { IntegrityStatus, RiskLevel, Role, SharePermission } from '@prisma/client';
+import { IntegrityStatus, RiskLevel, Role, SharePermission, FileSensitivity } from '@prisma/client';
 import crypto from 'crypto';
 import { Readable } from 'stream';
 import { trackDownloadSpike } from './threatService';
 import { triggerHoneyfileTrap } from './honeyfileService';
 import { sendShareNotificationEmail } from './emailService';
+import { evaluateAdaptivePolicy } from './policyEngine';
+import { calculateUserRiskScore } from './riskEngine';
+import { classifyFileSensitivity } from '../utils/fileSensitivityClassifier';
 
 // Utility helper to convert MinIO stream to Buffer
 async function streamToBuffer(stream: Readable): Promise<Buffer> {
@@ -113,10 +116,22 @@ export async function uploadFile(
   originalFilename: string,
   mimeType: string,
   isHoneyfile: boolean = false,
+  sensitivity: FileSensitivity = FileSensitivity.INTERNAL,
   ipAddress: string,
   userAgent: string
 ) {
-  console.log(`[Upload Pipeline] Initiating upload: "${originalFilename}" (${fileBuffer.length} bytes, MIME: ${mimeType}) for user ${userId}`);
+  // Perform Automatic File Sensitivity Analysis
+  const autoClassification = classifyFileSensitivity(
+    originalFilename,
+    mimeType,
+    fileBuffer,
+    sensitivity
+  );
+  const finalSensitivity = autoClassification.sensitivity;
+
+  console.log(
+    `[Upload Pipeline] Initiating upload: "${originalFilename}" (${fileBuffer.length} bytes, Auto-Sensitivity: ${finalSensitivity}, Reasons: ${autoClassification.reasons.join('; ')}) for user ${userId}`
+  );
 
   // Enforce cumulative 2 GB storage quota per user
   const currentUsage = await prisma.file.aggregate({
@@ -138,35 +153,22 @@ export async function uploadFile(
 
   // Encrypt plaintext file using AES-256-GCM envelope encryption
   const cryptoData = encryptEnvelope(fileBuffer);
-  console.log(`[Upload Pipeline] AES-256-GCM envelope encryption complete. Ciphertext size: ${cryptoData.ciphertext.length} bytes`);
 
   // Upload ONLY ciphertext to MinIO
   try {
-  await cloudinary.uploader.upload(
-    `data:application/octet-stream;base64,${cryptoData.ciphertext.toString('base64')}`,
-    {
-      resource_type: 'raw',
-      type: 'authenticated',
-      public_id: storageKey,
-      folder: CLOUDINARY_FOLDER,
-      overwrite: false,
-    }
-  );
-
-  console.log(
-    `[Upload Pipeline] Ciphertext successfully uploaded to Cloudinary storage key "${storageKey}"`
-  );
-} catch (cloudinaryErr: any) {
-  console.error(
-    `[Upload Pipeline ERROR] Cloudinary upload failed for key "${storageKey}":`,
-    cloudinaryErr.message
-  );
-
-  throw {
-    statusCode: 500,
-    message: `Storage failure: ${cloudinaryErr.message}`,
-  };
-}
+    await minioClient.putObject(
+      BUCKET_NAME,
+      storageKey,
+      cryptoData.ciphertext,
+      cryptoData.ciphertext.length,
+      {
+        'content-type': 'application/octet-stream',
+      }
+    );
+  } catch (minioErr: any) {
+    console.error(`[Upload Pipeline ERROR] MinIO putObject failed for key "${storageKey}":`, minioErr.message);
+    throw { statusCode: 500, message: `Storage failure: ${minioErr.message}` };
+  }
 
   // Store metadata & encrypted DEK in PostgreSQL
   const fileRecord = await prisma.file.create({
@@ -184,9 +186,9 @@ export async function uploadFile(
       dekAuthTag: cryptoData.dekAuthTag,
       integrityStatus: IntegrityStatus.OK,
       isHoneyfile,
+      sensitivity: finalSensitivity,
     },
   });
-  console.log(`[Upload Pipeline] Database metadata record created successfully. File ID: ${fileRecord.id}`);
 
   // Log upload audit event
   await prisma.activityLog.create({
@@ -201,6 +203,8 @@ export async function uploadFile(
         size: fileBuffer.length,
         mimeType,
         isHoneyfile,
+        sensitivity: finalSensitivity,
+        classificationReasons: autoClassification.reasons,
       },
     },
   });
@@ -214,20 +218,59 @@ export async function uploadFile(
     sha256Hash: fileRecord.sha256Hash,
     integrityStatus: fileRecord.integrityStatus,
     isHoneyfile: fileRecord.isHoneyfile,
+    sensitivity: fileRecord.sensitivity,
+    classificationReasons: autoClassification.reasons,
     createdAt: fileRecord.createdAt,
   };
 }
 
-export async function downloadFile(
+export async function viewFile(
   fileId: string,
   userId: string,
   userRole: Role,
   ipAddress: string,
   userAgent: string,
-  userEmail?: string
+  userEmail?: string,
+  stepUpMfaToken?: string
 ) {
-  // Single Source of Truth Authorization
-  const { file } = await authorizeFileAccess(fileId, userId, userRole, 'DOWNLOAD', userEmail);
+  // RISK-DRIVEN DEK RELEASE GATE & ADAPTIVE POLICY EVALUATION
+  const policyResult = await evaluateAdaptivePolicy({
+    userId,
+    fileId,
+    requestedAccess: SharePermission.VIEW,
+    userRole,
+    ipAddress,
+    userAgent,
+    userEmail,
+    stepUpMfaToken,
+  });
+
+  if (policyResult.decision === 'BLOCK') {
+    throw {
+      statusCode: 403,
+      message: policyResult.explanation.description,
+      adaptiveDecision: policyResult.decision,
+      riskScore: policyResult.riskScore,
+      riskLevel: policyResult.riskLevel,
+      fileSensitivity: policyResult.fileSensitivity,
+      reasons: policyResult.reasons,
+    };
+  }
+
+  if (policyResult.decision === 'MFA_REQUIRED') {
+    throw {
+      statusCode: 403,
+      message: policyResult.explanation.description,
+      mfaRequired: true,
+      adaptiveDecision: policyResult.decision,
+      riskScore: policyResult.riskScore,
+      riskLevel: policyResult.riskLevel,
+      fileSensitivity: policyResult.fileSensitivity,
+      reasons: policyResult.reasons,
+    };
+  }
+
+  const file = policyResult.file;
 
   // Trigger Honeyfile Deception Trap if file is decoy honeyfile
   if (file.isHoneyfile) {
@@ -239,30 +282,14 @@ export async function downloadFile(
   }
 
   // Retrieve ciphertext from MinIO
-  let ciphertextBuffer: Buffer;
-
-try {
-  const resource = await cloudinary.api.resource(
-    `${CLOUDINARY_FOLDER}/${file.storageKey}`,
-    {
-      resource_type: 'raw',
-      type: 'authenticated',
-    }
-  );
-
-  const response = await fetch(resource.secure_url);
-
-  if (!response.ok) {
-    throw new Error(`Cloudinary returned HTTP ${response.status}`);
+  let ciphertextStream: Readable;
+  try {
+    ciphertextStream = await minioClient.getObject(BUCKET_NAME, file.storageKey);
+  } catch (err: any) {
+    throw { statusCode: 500, message: 'Failed to retrieve file ciphertext from object storage.' };
   }
 
-  ciphertextBuffer = Buffer.from(await response.arrayBuffer());
-} catch (err: any) {
-  throw {
-    statusCode: 500,
-    message: 'Failed to retrieve file ciphertext from object storage.',
-  };
-}
+  const ciphertextBuffer = await streamToBuffer(ciphertextStream);
 
   // Attempt decryption & integrity check
   let decryptedBuffer: Buffer;
@@ -278,13 +305,11 @@ try {
     });
   } catch (error: any) {
     if (error instanceof GcmAuthTagError || error instanceof HashMismatchError) {
-      // Mark file TAMPERED
       await prisma.file.update({
         where: { id: file.id },
         data: { integrityStatus: IntegrityStatus.TAMPERED },
       });
 
-      // Generate Critical Security Alert
       await prisma.securityAlert.create({
         data: {
           userId: file.ownerId,
@@ -294,7 +319,163 @@ try {
         },
       });
 
-      // Audit Log tamper detection
+      await prisma.activityLog.create({
+        data: {
+          userId,
+          actionType: 'FILE_TAMPER_DETECTED',
+          resourceId: file.id,
+          ipAddress,
+          userAgent,
+          metadata: { error: error.message },
+        },
+      });
+
+      throw {
+        statusCode: 400,
+        message: 'FILE_TAMPERED: Integrity verification failed for this file. Access blocked for security.',
+        integrityStatus: 'TAMPERED',
+      };
+    }
+
+    throw { statusCode: 500, message: `Decryption error: ${error.message}` };
+  }
+
+  // Audit log view
+  await prisma.activityLog.create({
+    data: {
+      userId,
+      actionType: 'FILE_VIEWED',
+      resourceId: file.id,
+      ipAddress,
+      userAgent,
+      metadata: {
+        riskScore: policyResult.riskScore,
+        riskLevel: policyResult.riskLevel,
+        sensitivity: file.sensitivity,
+      },
+    },
+  });
+
+  return {
+    decryptedBuffer,
+    mimeType: file.mimeType,
+    originalFilename: file.originalFilename,
+    policy: {
+      riskScore: policyResult.riskScore,
+      riskLevel: policyResult.riskLevel,
+      fileSensitivity: policyResult.fileSensitivity,
+      decision: policyResult.decision,
+    },
+  };
+}
+
+export async function downloadFile(
+  fileId: string,
+  userId: string,
+  userRole: Role,
+  ipAddress: string,
+  userAgent: string,
+  userEmail?: string,
+  stepUpMfaToken?: string
+) {
+  // RISK-DRIVEN DEK RELEASE GATE & ADAPTIVE POLICY EVALUATION
+  const policyResult = await evaluateAdaptivePolicy({
+    userId,
+    fileId,
+    requestedAccess: SharePermission.DOWNLOAD,
+    userRole,
+    ipAddress,
+    userAgent,
+    userEmail,
+    stepUpMfaToken,
+  });
+
+  if (policyResult.decision === 'BLOCK') {
+    throw {
+      statusCode: 403,
+      message: policyResult.explanation.description,
+      adaptiveDecision: policyResult.decision,
+      riskScore: policyResult.riskScore,
+      riskLevel: policyResult.riskLevel,
+      fileSensitivity: policyResult.fileSensitivity,
+      reasons: policyResult.reasons,
+    };
+  }
+
+  if (policyResult.decision === 'MFA_REQUIRED') {
+    throw {
+      statusCode: 403,
+      message: policyResult.explanation.description,
+      mfaRequired: true,
+      adaptiveDecision: policyResult.decision,
+      riskScore: policyResult.riskScore,
+      riskLevel: policyResult.riskLevel,
+      fileSensitivity: policyResult.fileSensitivity,
+      reasons: policyResult.reasons,
+    };
+  }
+
+  if (policyResult.decision === 'VIEW_ONLY') {
+    throw {
+      statusCode: 403,
+      message: 'Access restricted by Risk-Adaptive Security Policy. Download is prohibited; file may only be viewed.',
+      adaptiveDecision: policyResult.decision,
+      riskScore: policyResult.riskScore,
+      riskLevel: policyResult.riskLevel,
+      fileSensitivity: policyResult.fileSensitivity,
+      reasons: policyResult.reasons,
+    };
+  }
+
+  const file = policyResult.file;
+
+  // Trigger Honeyfile Deception Trap if file is decoy honeyfile
+  if (file.isHoneyfile) {
+    try {
+      await triggerHoneyfileTrap(file, userId, ipAddress, userAgent);
+    } catch (err: any) {
+      console.warn('Honeyfile trap trigger warning:', err.message);
+    }
+  }
+
+  // Retrieve ciphertext from MinIO
+  let ciphertextStream: Readable;
+  try {
+    ciphertextStream = await minioClient.getObject(BUCKET_NAME, file.storageKey);
+  } catch (err: any) {
+    throw { statusCode: 500, message: 'Failed to retrieve file ciphertext from object storage.' };
+  }
+
+  const ciphertextBuffer = await streamToBuffer(ciphertextStream);
+
+  // Attempt decryption & integrity check
+  let decryptedBuffer: Buffer;
+  try {
+    decryptedBuffer = decryptEnvelope({
+      ciphertext: ciphertextBuffer,
+      iv: file.iv,
+      authTag: file.authTag,
+      wrappedDek: file.wrappedDek,
+      dekIv: file.dekIv,
+      dekAuthTag: file.dekAuthTag,
+      expectedSha256Hash: file.sha256Hash,
+    });
+  } catch (error: any) {
+    if (error instanceof GcmAuthTagError || error instanceof HashMismatchError) {
+      await prisma.file.update({
+        where: { id: file.id },
+        data: { integrityStatus: IntegrityStatus.TAMPERED },
+      });
+
+      await prisma.securityAlert.create({
+        data: {
+          userId: file.ownerId,
+          alertType: 'FILE_TAMPER_DETECTED',
+          riskLevel: RiskLevel.CRITICAL,
+          description: `Integrity check failed for file '${file.originalFilename}' (ID: ${file.id}). ${error.message}`,
+        },
+      });
+
       await prisma.activityLog.create({
         data: {
           userId,
@@ -324,6 +505,11 @@ try {
       resourceId: file.id,
       ipAddress,
       userAgent,
+      metadata: {
+        riskScore: policyResult.riskScore,
+        riskLevel: policyResult.riskLevel,
+        sensitivity: file.sensitivity,
+      },
     },
   });
 
@@ -366,12 +552,51 @@ export async function listUserFiles(userId: string, search?: string) {
       sha256Hash: true,
       integrityStatus: true,
       isHoneyfile: true,
+      sensitivity: true,
       createdAt: true,
       updatedAt: true,
     },
   });
 
   return files;
+}
+
+export async function updateFileSensitivity(
+  fileId: string,
+  userId: string,
+  sensitivity: FileSensitivity,
+  ipAddress: string,
+  userAgent: string
+) {
+  const file = await prisma.file.findUnique({
+    where: { id: fileId },
+  });
+
+  if (!file) {
+    throw { statusCode: 404, message: 'File not found.' };
+  }
+
+  if (file.ownerId !== userId) {
+    throw { statusCode: 403, message: 'Only the file owner can update sensitivity classification.' };
+  }
+
+  const updatedFile = await prisma.file.update({
+    where: { id: fileId },
+    data: { sensitivity },
+  });
+
+  await prisma.activityLog.create({
+    data: {
+      userId,
+      actionType: 'FILE_SENSITIVITY_UPDATED',
+      resourceId: fileId,
+      ipAddress,
+      userAgent,
+      metadata: { oldSensitivity: file.sensitivity, newSensitivity: sensitivity },
+    },
+  });
+
+  return updatedFile;
 }
 
 export async function getFileDetails(
@@ -384,7 +609,6 @@ export async function getFileDetails(
 ) {
   const { file } = await authorizeFileAccess(fileId, userId, userRole, 'VIEW', userEmail);
 
-  // Trigger Honeyfile Deception Trap if file is decoy honeyfile
   if (file.isHoneyfile) {
     try {
       await triggerHoneyfileTrap(file, userId, ipAddress, userAgent);
@@ -407,6 +631,7 @@ export async function getFileDetails(
     wrappedDekConfigured: true,
     integrityStatus: file.integrityStatus,
     isHoneyfile: file.isHoneyfile,
+    sensitivity: file.sensitivity || FileSensitivity.INTERNAL,
     createdAt: file.createdAt,
     updatedAt: file.updatedAt,
   };
@@ -415,29 +640,16 @@ export async function getFileDetails(
 export async function deleteFile(fileId: string, userId: string, ipAddress: string, userAgent: string) {
   const { file } = await authorizeFileAccess(fileId, userId, Role.USER, 'DELETE');
 
-  // 1. Delete object from MinIO
   try {
-  await cloudinary.uploader.destroy(
-    `${CLOUDINARY_FOLDER}/${file.storageKey}`,
-    {
-      resource_type: 'raw',
-      type: 'authenticated',
-      invalidate: true,
-    }
-  );
-} catch (err: any) {
-  console.warn(
-    `Cloudinary delete warning for key ${file.storageKey}:`,
-    err.message
-  );
-}
+    await minioClient.removeObject(BUCKET_NAME, file.storageKey);
+  } catch (err: any) {
+    console.warn(`MinIO delete warning for key ${file.storageKey}:`, err.message);
+  }
 
-  // 2. Delete database record
   await prisma.file.delete({
     where: { id: fileId },
   });
 
-  // 3. Log audit action
   await prisma.activityLog.create({
     data: {
       userId,
@@ -461,7 +673,6 @@ export async function verifyFileIntegrity(
 ) {
   const { file } = await authorizeFileAccess(fileId, userId, userRole, 'VIEW');
 
-  // Trigger Honeyfile Deception Trap if file is decoy honeyfile
   if (file.isHoneyfile) {
     try {
       await triggerHoneyfileTrap(file, userId, ipAddress, userAgent);
@@ -470,31 +681,15 @@ export async function verifyFileIntegrity(
     }
   }
 
-  // Fetch ciphertext from MinIO
-  let ciphertextBuffer: Buffer;
-
-try {
-  const resource = await cloudinary.api.resource(
-    `${CLOUDINARY_FOLDER}/${file.storageKey}`,
-    {
-      resource_type: 'raw',
-      type: 'authenticated',
-    }
-  );
-
-  const response = await fetch(resource.secure_url);
-
-  if (!response.ok) {
-    throw new Error(`Cloudinary returned HTTP ${response.status}`);
+  let ciphertextStream: Readable;
+  try {
+    ciphertextStream = await minioClient.getObject(BUCKET_NAME, file.storageKey);
+  } catch (err: any) {
+    throw { statusCode: 500, message: 'Failed to retrieve file ciphertext from storage.' };
   }
 
-  ciphertextBuffer = Buffer.from(await response.arrayBuffer());
-} catch (err: any) {
-  throw {
-    statusCode: 500,
-    message: 'Failed to retrieve file ciphertext from storage.',
-  };
-}
+  const ciphertextBuffer = await streamToBuffer(ciphertextStream);
+
   try {
     decryptEnvelope({
       ciphertext: ciphertextBuffer,
@@ -625,7 +820,6 @@ export async function shareFile(
   ipAddress: string,
   userAgent: string
 ) {
-  // Verify ownership
   const file = await prisma.file.findUnique({
     where: { id: fileId },
   });
@@ -638,7 +832,6 @@ export async function shareFile(
     throw { statusCode: 403, message: 'Only the file owner can grant sharing permissions.' };
   }
 
-  // Resolve recipient using case-insensitive email lookup
   const targetEmail = recipientEmail.trim().toLowerCase();
   const recipient = await prisma.user.findFirst({
     where: {
@@ -668,7 +861,6 @@ export async function shareFile(
     }
   }
 
-  // Upsert FileShare record (prevents duplicates, updates permission/expiry)
   const share = await prisma.fileShare.upsert({
     where: {
       fileId_sharedWithId: {
@@ -695,7 +887,6 @@ export async function shareFile(
     },
   });
 
-  // Audit Log
   await prisma.activityLog.create({
     data: {
       userId: ownerId,
@@ -711,13 +902,11 @@ export async function shareFile(
     },
   });
 
-  // Fetch owner email for notification template
   const owner = await prisma.user.findUnique({
     where: { id: ownerId },
     select: { email: true },
   });
 
-  // Dispatch notification email
   let emailSent = false;
   let emailError: string | undefined = undefined;
 
@@ -763,7 +952,12 @@ export async function listFileShares(fileId: string, ownerId: string) {
   });
 }
 
-export async function listFilesSharedWithUser(userId: string, userEmail?: string) {
+export async function listFilesSharedWithUser(
+  userId: string,
+  userEmail?: string,
+  ipAddress?: string,
+  userAgent?: string
+) {
   const now = new Date();
   const normalizedEmail = userEmail?.trim().toLowerCase();
 
@@ -798,6 +992,7 @@ export async function listFilesSharedWithUser(userId: string, userEmail?: string
           mimeType: true,
           sha256Hash: true,
           integrityStatus: true,
+          sensitivity: true,
           createdAt: true,
           owner: {
             select: { id: true, email: true },
@@ -811,11 +1006,143 @@ export async function listFilesSharedWithUser(userId: string, userEmail?: string
     orderBy: { createdAt: 'desc' },
   });
 
+  // Calculate current dynamic risk score for authenticated recipient
+  let recipientRiskScore = 0;
+  let recipientRiskLevel: RiskLevel = RiskLevel.LOW;
+  let recipientRiskReasons: string[] = [];
+  let recipientRiskFactors: any[] = [];
+
+  try {
+    const riskEval = await calculateUserRiskScore(
+      userId,
+      ipAddress || '127.0.0.1',
+      userAgent || 'Browser'
+    );
+    recipientRiskScore = riskEval.riskScore;
+    recipientRiskLevel = riskEval.riskLevel;
+    recipientRiskReasons = riskEval.reasons;
+    recipientRiskFactors = riskEval.factors || [];
+  } catch (err: any) {
+    console.warn('Recipient risk calculation warning:', err.message);
+  }
+
+  return activeShares
+    .filter((s) => s.file)
+    .map((s) => {
+      // Evaluate expected adaptive access decision for this recipient and file sensitivity
+      let decision: 'ALLOW' | 'VIEW_ONLY' | 'MFA_REQUIRED' | 'BLOCK' = 'ALLOW';
+      const sensitivity = s.file.sensitivity || FileSensitivity.INTERNAL;
+
+      if (recipientRiskLevel === RiskLevel.CRITICAL) {
+        // 70-100 CRITICAL risk: ALL sensitivities BLOCKED
+        decision = 'BLOCK';
+      } else if (recipientRiskLevel === RiskLevel.HIGH) {
+        // 40-69 HIGH risk:
+        // RESTRICTED & CRITICAL -> BLOCK
+        // CONFIDENTIAL -> MFA_REQUIRED
+        // PUBLIC & INTERNAL -> VIEW_ONLY
+        if (sensitivity === FileSensitivity.RESTRICTED || sensitivity === FileSensitivity.CRITICAL) {
+          decision = 'BLOCK';
+        } else if (sensitivity === FileSensitivity.CONFIDENTIAL) {
+          decision = 'MFA_REQUIRED';
+        } else {
+          decision = 'VIEW_ONLY';
+        }
+      } else if (recipientRiskLevel === RiskLevel.MEDIUM) {
+        // 20-39 MEDIUM risk:
+        // PUBLIC & INTERNAL -> ALLOW
+        // CONFIDENTIAL, RESTRICTED, CRITICAL -> MFA_REQUIRED
+        if (
+          sensitivity === FileSensitivity.CONFIDENTIAL ||
+          sensitivity === FileSensitivity.RESTRICTED ||
+          sensitivity === FileSensitivity.CRITICAL
+        ) {
+          decision = 'MFA_REQUIRED';
+        } else {
+          decision = 'ALLOW';
+        }
+      } else {
+        // 0-19 LOW risk:
+        // PUBLIC, INTERNAL, CONFIDENTIAL -> ALLOW
+        // RESTRICTED, CRITICAL -> MFA_REQUIRED
+        if (sensitivity === FileSensitivity.RESTRICTED || sensitivity === FileSensitivity.CRITICAL) {
+          decision = 'MFA_REQUIRED';
+        } else {
+          decision = 'ALLOW';
+        }
+      }
+
+      // Enforce zero permission escalation for VIEW shares
+      if (s.permission === SharePermission.VIEW && decision === 'ALLOW') {
+        decision = 'VIEW_ONLY';
+      }
+
+      return {
+        shareId: s.id,
+        permission: s.permission,
+        expiresAt: s.expiresAt,
+        sharedAt: s.createdAt,
+        sharedByEmail: s.sharedBy.email,
+        file: s.file,
+        recipientRisk: {
+          riskScore: recipientRiskScore,
+          riskLevel: recipientRiskLevel,
+          decision,
+          reasons: recipientRiskReasons,
+          factors: recipientRiskFactors,
+        },
+      };
+    });
+}
+
+export async function listFilesSharedByUser(userId: string) {
+  const now = new Date();
+
+  const activeShares = await prisma.fileShare.findMany({
+    where: {
+      OR: [
+        { sharedById: userId },
+        { file: { ownerId: userId } },
+      ],
+      AND: [
+        {
+          OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+        },
+      ],
+    },
+    include: {
+      file: {
+        select: {
+          id: true,
+          originalFilename: true,
+          storageKey: true,
+          size: true,
+          mimeType: true,
+          sha256Hash: true,
+          integrityStatus: true,
+          sensitivity: true,
+          createdAt: true,
+          owner: {
+            select: { id: true, email: true },
+          },
+        },
+      },
+      sharedWith: {
+        select: { id: true, email: true },
+      },
+      sharedBy: {
+        select: { id: true, email: true },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
   return activeShares.map((s) => ({
     shareId: s.id,
     permission: s.permission,
     expiresAt: s.expiresAt,
     sharedAt: s.createdAt,
+    sharedWithEmail: s.sharedWith.email,
     sharedByEmail: s.sharedBy.email,
     file: s.file,
   }));

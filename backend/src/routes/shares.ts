@@ -5,6 +5,7 @@ import {
   shareFile,
   listFileShares,
   listFilesSharedWithUser,
+  listFilesSharedByUser,
   revokeShare,
 } from '../services/fileService';
 
@@ -48,8 +49,8 @@ shareRouter.post('/', async (req: AuthRequest, res: Response) => {
     );
 
     const message = result.emailSent
-      ? 'File shared successfully and notification email delivered to recipient.'
-      : 'File shared successfully, but notification email could not be delivered.';
+      ? `File shared successfully. Notification email sent to ${recipientEmail}.`
+      : 'File shared successfully, but the notification email could not be sent.';
 
     return res.status(201).json({
       message,
@@ -78,18 +79,34 @@ shareRouter.get('/file/:fileId', async (req: AuthRequest, res: Response) => {
   }
 });
 
-// GET /api/shares/shared-with-me (List files shared with authenticated user)
-shareRouter.get('/shared-with-me', async (req: AuthRequest, res: Response) => {
+// GET /api/shares/shared-with-me OR /api/shares/with-me (List files shared with authenticated user)
+shareRouter.get(['/shared-with-me', '/with-me'], async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: 'Authentication required' });
     }
 
-    const shares = await listFilesSharedWithUser(req.user.id, req.user.email);
+    const { ipAddress, userAgent } = getClientMeta(req);
+    const shares = await listFilesSharedWithUser(req.user.id, req.user.email, ipAddress, userAgent);
     return res.status(200).json({ shares });
   } catch (error: any) {
     const statusCode = error.statusCode || 500;
     return res.status(statusCode).json({ error: error.message || 'Failed to list shared files' });
+  }
+});
+
+// GET /api/shares/shared-by-me OR /api/shares/by-me (List files shared by authenticated user with others)
+shareRouter.get(['/shared-by-me', '/by-me'], async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const shares = await listFilesSharedByUser(req.user.id);
+    return res.status(200).json({ shares });
+  } catch (error: any) {
+    const statusCode = error.statusCode || 500;
+    return res.status(statusCode).json({ error: error.message || 'Failed to list files shared by user' });
   }
 });
 

@@ -17,7 +17,10 @@ export function isTestDomainEmail(email: string): boolean {
     domain === 'example.org' ||
     domain === 'example.net' ||
     domain.endsWith('.test') ||
-    domain === 'test.local'
+    domain === 'test.local' ||
+    domain === 'filevault.ai' ||
+    domain.endsWith('.filevault.ai') ||
+    domain === 'filevault-ai.local'
   );
 }
 
@@ -140,6 +143,7 @@ export async function sendShareNotificationEmail(
   error?: string;
 }> {
   const targetRecipient = (input.recipientEmail || '').trim().toLowerCase();
+  const isDev = process.env.NODE_ENV !== 'production';
 
   if (!targetRecipient) {
     console.error('[SMTP ERROR] Cannot send share notification: recipient email is empty.');
@@ -152,7 +156,7 @@ export async function sendShareNotificationEmail(
   }
 
   if (!isSmtpConfigured()) {
-    console.warn(`[SMTP WARN] Cannot send share notification to ${targetRecipient}: SMTP_USER or SMTP_PASS not set.`);
+    console.warn(`[SMTP WARN] Cannot send share notification to ${targetRecipient}: SMTP credentials not set.`);
     return {
       success: false,
       error: 'SMTP credentials (SMTP_USER / SMTP_PASS) not configured on backend server.',
@@ -179,16 +183,7 @@ export async function sendShareNotificationEmail(
 
     const info = await smtpTransport.sendMail(mailOptions);
     
-    console.log(`\n==================================================`);
-    console.log(`[SHARE EMAIL DEBUG]`);
-    console.log(`Sender: ${sender}`);
-    console.log(`Recipient: ${targetRecipient}`);
-    console.log(`Envelope To: ${targetRecipient}`);
-    console.log(`Accepted: ${JSON.stringify(info.accepted)}`);
-    console.log(`Rejected: ${JSON.stringify(info.rejected)}`);
-    console.log(`Response: ${info.response}`);
-    console.log(`MessageId: ${info.messageId}`);
-    console.log(`==================================================\n`);
+    console.log(`[SMTP SUCCESS] Share notification email delivered to ${targetRecipient}. MessageId: ${info.messageId}`);
 
     return {
       success: info.accepted.includes(targetRecipient) || info.accepted.length > 0,
@@ -264,7 +259,7 @@ export async function sendRegistrationOtpEmail(
   }
 
   if (!isSmtpConfigured()) {
-    console.warn(`[SMTP WARN] Cannot send registration OTP to ${targetRecipient}: SMTP_USER or SMTP_PASS not set.`);
+    console.warn(`[SMTP WARN] Cannot send registration OTP to ${targetRecipient}: SMTP credentials not configured.`);
     return {
       success: false,
       error: 'SMTP credentials (SMTP_USER / SMTP_PASS) not configured on backend server.',
@@ -361,7 +356,7 @@ export async function sendLoginOtpEmail(
   }
 
   if (!isSmtpConfigured()) {
-    console.warn(`[SMTP WARN] Cannot send login OTP to ${targetRecipient}: SMTP_USER or SMTP_PASS not set.`);
+    console.warn(`[SMTP WARN] Cannot send login OTP to ${targetRecipient}: SMTP credentials not configured.`);
     return {
       success: false,
       error: 'SMTP credentials (SMTP_USER / SMTP_PASS) not configured on backend server.',

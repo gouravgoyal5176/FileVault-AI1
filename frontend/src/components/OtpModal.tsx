@@ -166,8 +166,8 @@ export function OtpModal({ isOpen, email, onVerified, onClose }: OtpModalProps) 
               required
               className="w-full text-center text-2xl sm:text-3xl font-black tracking-[8px] sm:tracking-[10px] py-4 bg-[#05070E]/90 border border-slate-800 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-2xl text-emerald-300 placeholder-slate-600 focus:outline-none transition-all duration-200 shadow-inner font-mono"
             />
-            <p className="text-[10px] sm:text-xs text-slate-400 text-center font-medium">
-              Check your Gmail inbox or spam folder. Code expires in 5 minutes.
+            <p className="text-[10px] sm:text-xs text-slate-400 text-center font-medium leading-relaxed">
+              Check your Gmail inbox for the 6-digit verification code. Code expires in 5 minutes.
             </p>
           </div>
 

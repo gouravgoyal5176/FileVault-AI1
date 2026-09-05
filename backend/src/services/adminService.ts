@@ -105,9 +105,9 @@ export async function listAdminUsers(params: {
   return users;
 }
 
-export async function getAdminUserDetails(targetUserId: string) {
+export async function getAdminUserDetails(userId: string) {
   const user = await prisma.user.findUnique({
-    where: { id: targetUserId },
+    where: { id: userId },
     select: {
       id: true,
       email: true,
@@ -139,185 +139,162 @@ export async function getAdminUserDetails(targetUserId: string) {
   }
 
   const recentLogs = await prisma.activityLog.findMany({
-    where: { userId: targetUserId },
+    where: { userId },
     orderBy: { timestamp: 'desc' },
-    take: 10,
+    take: 15,
   });
 
-  return {
-    user,
-    recentLogs,
-  };
+  return { user, recentLogs };
 }
 
-export async function suspendUserAccount(adminUserId: string, targetUserId: string, ipAddress: string, userAgent: string) {
-  if (adminUserId === targetUserId) {
-    throw { statusCode: 400, message: 'Administrator cannot suspend their own account.' };
+export async function suspendUserAccount(adminId: string, targetUserId: string, ipAddress: string, userAgent: string) {
+  if (adminId === targetUserId) {
+    throw { statusCode: 400, message: 'Admins cannot suspend their own account.' };
   }
 
-  const targetUser = await prisma.user.findUnique({ where: { id: targetUserId } });
-  if (!targetUser) {
-    throw { statusCode: 404, message: 'User account not found.' };
-  }
-
-  if (targetUser.role === Role.ADMIN) {
-    const adminCount = await prisma.user.count({ where: { role: Role.ADMIN, status: UserStatus.ACTIVE } });
-    if (adminCount <= 1) {
-      throw { statusCode: 400, message: 'Cannot suspend the last remaining active administrator account.' };
-    }
+  const target = await prisma.user.findUnique({ where: { id: targetUserId } });
+  if (!target) {
+    throw { statusCode: 404, message: 'Target user not found.' };
   }
 
   const updatedUser = await prisma.user.update({
     where: { id: targetUserId },
     data: { status: UserStatus.SUSPENDED },
-    select: { id: true, email: true, status: true, role: true },
   });
 
-  // Revoke all active sessions
   await prisma.refreshToken.updateMany({
     where: { userId: targetUserId },
     data: { revoked: true },
   });
 
-  // Log admin action
   await prisma.activityLog.create({
     data: {
-      userId: adminUserId,
-      actionType: 'ADMIN_SUSPENDED_USER',
+      userId: adminId,
+      actionType: 'ADMIN_USER_SUSPENDED',
       resourceId: targetUserId,
       ipAddress,
       userAgent,
-      metadata: { targetEmail: targetUser.email },
+      metadata: { targetEmail: target.email },
     },
   });
 
   return updatedUser;
 }
 
-export async function activateUserAccount(adminUserId: string, targetUserId: string, ipAddress: string, userAgent: string) {
-  const targetUser = await prisma.user.findUnique({ where: { id: targetUserId } });
-  if (!targetUser) {
-    throw { statusCode: 404, message: 'User account not found.' };
+export async function activateUserAccount(adminId: string, targetUserId: string, ipAddress: string, userAgent: string) {
+  const target = await prisma.user.findUnique({ where: { id: targetUserId } });
+  if (!target) {
+    throw { statusCode: 404, message: 'Target user not found.' };
   }
 
   const updatedUser = await prisma.user.update({
     where: { id: targetUserId },
-    data: { status: UserStatus.ACTIVE },
-    select: { id: true, email: true, status: true, role: true },
+    data: {
+      status: UserStatus.ACTIVE,
+      failedLoginAttempts: 0,
+      lockoutUntil: null,
+    },
   });
 
   await prisma.activityLog.create({
     data: {
-      userId: adminUserId,
-      actionType: 'ADMIN_ACTIVATED_USER',
+      userId: adminId,
+      actionType: 'ADMIN_USER_ACTIVATED',
       resourceId: targetUserId,
       ipAddress,
       userAgent,
-      metadata: { targetEmail: targetUser.email },
+      metadata: { targetEmail: target.email },
     },
   });
 
   return updatedUser;
 }
 
-export async function revokeUserSessions(adminUserId: string, targetUserId: string, ipAddress: string, userAgent: string) {
-  const targetUser = await prisma.user.findUnique({ where: { id: targetUserId } });
-  if (!targetUser) {
-    throw { statusCode: 404, message: 'User account not found.' };
+export async function revokeUserSessions(adminId: string, targetUserId: string, ipAddress: string, userAgent: string) {
+  const target = await prisma.user.findUnique({ where: { id: targetUserId } });
+  if (!target) {
+    throw { statusCode: 404, message: 'Target user not found.' };
   }
 
-  await prisma.refreshToken.updateMany({
-    where: { userId: targetUserId },
+  const result = await prisma.refreshToken.updateMany({
+    where: { userId: targetUserId, revoked: false },
     data: { revoked: true },
   });
 
   await prisma.activityLog.create({
     data: {
-      userId: adminUserId,
-      actionType: 'ADMIN_REVOKED_SESSIONS',
+      userId: adminId,
+      actionType: 'ADMIN_USER_SESSIONS_REVOKED',
       resourceId: targetUserId,
       ipAddress,
       userAgent,
-      metadata: { targetEmail: targetUser.email },
+      metadata: { targetEmail: target.email, count: result.count },
     },
   });
 
-  return { message: `All active sessions revoked for user ${targetUser.email}.` };
+  return { message: `Revoked ${result.count} active sessions for ${target.email}.` };
 }
 
-export async function resetUserAccount(adminUserId: string, targetUserId: string, ipAddress: string, userAgent: string) {
-  const targetUser = await prisma.user.findUnique({ where: { id: targetUserId } });
-  if (!targetUser) {
-    throw { statusCode: 404, message: 'User account not found.' };
+export async function resetUserAccount(adminId: string, targetUserId: string, ipAddress: string, userAgent: string) {
+  const target = await prisma.user.findUnique({ where: { id: targetUserId } });
+  if (!target) {
+    throw { statusCode: 404, message: 'Target user not found.' };
   }
 
-  // Revoke refresh tokens
-  await prisma.refreshToken.updateMany({
-    where: { userId: targetUserId },
-    data: { revoked: true },
-  });
-
-  // Reset failed login counters and lockout status
-  await prisma.user.update({
+  const updatedUser = await prisma.user.update({
     where: { id: targetUserId },
     data: {
+      status: UserStatus.ACTIVE,
       failedLoginAttempts: 0,
       lockoutUntil: null,
-      status: UserStatus.ACTIVE,
     },
+  });
+
+  await prisma.refreshToken.updateMany({
+    where: { userId: targetUserId },
+    data: { revoked: true },
   });
 
   await prisma.activityLog.create({
     data: {
-      userId: adminUserId,
-      actionType: 'ADMIN_RESET_USER',
+      userId: adminId,
+      actionType: 'ADMIN_USER_ACCOUNT_RESET',
       resourceId: targetUserId,
       ipAddress,
       userAgent,
-      metadata: { targetEmail: targetUser.email },
+      metadata: { targetEmail: target.email },
     },
   });
 
-  return { message: `Account reset completed successfully for user ${targetUser.email}.` };
+  return { message: `Account status and security state reset for ${target.email}.`, user: updatedUser };
 }
 
-export async function deleteUserAccount(adminUserId: string, targetUserId: string, ipAddress: string, userAgent: string) {
-  if (adminUserId === targetUserId) {
-    throw { statusCode: 400, message: 'Administrator cannot delete their own logged-in account.' };
+export async function deleteUserAccount(adminId: string, targetUserId: string, ipAddress: string, userAgent: string) {
+  if (adminId === targetUserId) {
+    throw { statusCode: 400, message: 'Admins cannot delete their own account.' };
   }
 
-  const targetUser = await prisma.user.findUnique({ where: { id: targetUserId } });
-  if (!targetUser) {
-    throw { statusCode: 404, message: 'User account not found.' };
+  const target = await prisma.user.findUnique({ where: { id: targetUserId } });
+  if (!target) {
+    throw { statusCode: 404, message: 'Target user not found.' };
   }
 
-  if (targetUser.role === Role.ADMIN) {
-    const adminCount = await prisma.user.count({ where: { role: Role.ADMIN } });
-    if (adminCount <= 1) {
-      throw { statusCode: 400, message: 'Cannot delete the last remaining administrator account.' };
-    }
-  }
-
-  const targetEmail = targetUser.email;
-
-  // Perform clean deletion of user account
   await prisma.user.delete({
     where: { id: targetUserId },
   });
 
-  // Log admin action (userId is SetNull by Prisma relation on delete)
   await prisma.activityLog.create({
     data: {
-      userId: adminUserId,
-      actionType: 'ADMIN_DELETED_USER',
+      userId: adminId,
+      actionType: 'ADMIN_USER_DELETED',
       resourceId: targetUserId,
       ipAddress,
       userAgent,
-      metadata: { deletedEmail: targetEmail },
+      metadata: { targetEmail: target.email },
     },
   });
 
-  return { message: `User account '${targetEmail}' permanently deleted. The email address is now available for fresh registration.` };
+  return { message: `User account ${target.email} deleted permanently.` };
 }
 
 export async function getAdminAuditLogs(params: {
@@ -326,24 +303,30 @@ export async function getAdminAuditLogs(params: {
   page?: number;
   limit?: number;
 }) {
-  const safeLimit = Math.max(1, Math.min(50, params.limit || 20));
   const safePage = Math.max(1, params.page || 1);
+  const safeLimit = Math.max(1, Math.min(100, params.limit || 20));
   const skip = (safePage - 1) * safeLimit;
 
   const whereClause: any = {};
+  const AND: any[] = [];
 
-  if (params.actionType && params.actionType.trim().length > 0) {
-    whereClause.actionType = params.actionType.trim();
+  if (params.actionType && params.actionType !== 'ALL') {
+    AND.push({ actionType: params.actionType });
   }
 
   if (params.search && params.search.trim().length > 0) {
-    const term = params.search.trim();
-    whereClause.OR = [
-      { actionType: { contains: term, mode: 'insensitive' } },
-      { ipAddress: { contains: term, mode: 'insensitive' } },
-      { userAgent: { contains: term, mode: 'insensitive' } },
-      { user: { email: { contains: term, mode: 'insensitive' } } },
-    ];
+    const searchStr = params.search.trim();
+    AND.push({
+      OR: [
+        { actionType: { contains: searchStr, mode: 'insensitive' } },
+        { ipAddress: { contains: searchStr, mode: 'insensitive' } },
+        { user: { email: { contains: searchStr, mode: 'insensitive' } } },
+      ],
+    });
+  }
+
+  if (AND.length > 0) {
+    whereClause.AND = AND;
   }
 
   const [logs, totalCount] = await Promise.all([
@@ -396,3 +379,19 @@ export async function getAdminSecurityAlerts(params: {
   return { alerts };
 }
 
+export async function getAdminAdaptiveDecisions() {
+  const decisions = await prisma.adaptiveSecurityDecision.findMany({
+    orderBy: { timestamp: 'desc' },
+    take: 50,
+    include: {
+      user: {
+        select: { id: true, email: true, role: true },
+      },
+      file: {
+        select: { id: true, originalFilename: true, sensitivity: true },
+      },
+    },
+  });
+
+  return { decisions };
+}

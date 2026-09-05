@@ -20,6 +20,8 @@ import {
   logoutAllDevices,
 } from '../services/authService';
 import { requireAuth, AuthRequest } from '../middleware/authMiddleware';
+import { prisma } from '../config/db';
+import crypto from 'crypto';
 
 export const authRouter = Router();
 
@@ -139,6 +141,69 @@ authRouter.post('/login/otp/verify', async (req: Request, res: Response) => {
   } catch (error: any) {
     const statusCode = error.statusCode || 400;
     return res.status(statusCode).json({ error: error.message || 'Verification failed' });
+  }
+});
+
+// POST /api/auth/step-up-mfa/send (Send Step-Up MFA OTP for Adaptive Risk Challenge)
+authRouter.post('/step-up-mfa/send', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const result = await sendLoginOtp(req.user.email);
+    return res.status(200).json({
+      success: true,
+      message: 'Step-up MFA verification code sent to your registered email.',
+      email: req.user.email,
+    });
+  } catch (error: any) {
+    const statusCode = error.statusCode || 500;
+    return res.status(statusCode).json({ error: error.message || 'Failed to send step-up verification code' });
+  }
+});
+
+// POST /api/auth/step-up-mfa/verify (Verify Step-Up MFA OTP and issue file-specific stepUpToken)
+authRouter.post('/step-up-mfa/verify', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const { otp, fileId, requestedAction } = req.body;
+    if (!otp || typeof otp !== 'string') {
+      return res.status(400).json({ error: 'Verification code is required.' });
+    }
+
+    const { ipAddress, userAgent } = getClientMeta(req);
+    await verifyLoginOtp(req.user.email, otp, res, ipAddress, userAgent);
+
+    // Record file-specific step-up MFA success log
+    const stepUpToken = `stepup_${crypto.randomUUID()}`;
+    await prisma.activityLog.create({
+      data: {
+        userId: req.user.id,
+        actionType: 'STEP_UP_MFA_SUCCESS',
+        resourceId: fileId || null,
+        ipAddress,
+        userAgent,
+        metadata: {
+          stepUpToken,
+          fileId: fileId || null,
+          requestedAction: requestedAction || 'ACCESS',
+          expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+        },
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Step-up MFA verified successfully.',
+      stepUpToken,
+    });
+  } catch (error: any) {
+    const statusCode = error.statusCode || 400;
+    return res.status(statusCode).json({ error: error.message || 'Step-up verification failed' });
   }
 });
 
